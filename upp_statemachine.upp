@@ -1,0 +1,17 @@
+description "description \"U++ asynchronous state machine with animation support\377";
+
+uses
+	Core;
+
+include
+	,
+	/include;
+
+file
+	main.cpp,
+	include/statemachine.h,
+	src/statemachine.cpp;
+
+mainconfig
+	"" = "";
+
