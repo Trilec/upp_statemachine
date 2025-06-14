@@ -1,30 +1,3 @@
-
-// StateMachine.h – Asynchronous, event‑driven FSM for U++
-// -------------------------------------------------------
-// Lightweight finite‑state‑machine helper for orchestrating UI / logic flow in
-// Ultimate++ applications.  100 % header‑only, no external dependencies.
-//
-//  • Event‑based transitions via `TriggerEvent()`
-//  • Async enter / exit using `done(bool success)` callbacks
-//  • Transition hooks: Guard / OnBefore / OnAfter
-//  • History stack + `GoBack()`
-//
-// Example
-// -------
-//     StateMachine sm;
-//     sm.SetInitial("Idle");
-//     sm.AddState({"Idle",
-//                  [](auto&, auto done){ LOG("Idle"); done(true); },
-//                  {}});
-//     sm.AddState({"Work",
-//                  [](auto&, auto done){ PostCallback([=]{ done(true); }); },
-//                  {}});
-//     sm.AddTransition({"start", "Idle", "Work"});
-//     sm.Start();
-//     sm.TriggerEvent("start");
-//
-// -------------------------------------------------------
-
 // StateMachine.h – Asynchronous, event‑driven FSM for U++
 // -------------------------------------------------------
 // Lightweight finite‑state‑machine helper for orchestrating UI / logic flow in
@@ -117,7 +90,7 @@ private:
     void DoTransition(const Transition& t, bool record = true);
     void Finalize(const TransitionContext& ctx, bool record);
 
-    // --- FIX: Store smart pointers in the vectors ---
+    // --- Store smart pointers in the vectors ---
     Vector<One<State>>            states;
     Vector<One<Transition>>       transitions;
     Vector<One<TransitionRecord>> transitionHistory;

@@ -1,8 +1,8 @@
-description "description \"U++ asynchronous state machine with animation support\377";
+description "U++ asynchronous state machine with animation support";
 
 uses
-	Core;
-
+	Core,
+    CtrlLib;
 include
 	,
 	/include;
