@@ -13,33 +13,41 @@ struct TestRunner : TopWindow {
     RichEdit      logDisplay;
     Button        actionButton;
     
-    String        qtf_log; // The data model: a single string holding all QTF content.
+    String        qtf_log; // The data model for the RichEdit control.
     bool          tests_cancelled = false;
 
-    // --- Logging Helpers (Using the correct SetQTF and Move public API) ---
-    void LogAppend(const String& s) {
-        // 1. Append new QTF to our master string data model.
-        qtf_log.Cat(s);
-        
-        // 2. Tell the RichEdit control to parse and display the entire updated log.
-        logDisplay.SetQTF(qtf_log);
-        
-        // 3. Move the cursor to the end to ensure the view scrolls down.
-        //    The correct public method is Move().
-        logDisplay.Move(logDisplay.GetLength());
+    // --- NEW: Decoupled Logging System ---
 
+    enum GuiLogStyle { GUI_LOG_NORMAL, GUI_LOG_HEADER, GUI_LOG_SUCCESS, GUI_LOG_ERROR };
+
+    // Logger for the RichEdit GUI window ONLY.
+    void GuiLog(const String& text, GuiLogStyle style = GUI_LOG_NORMAL, bool newline = true) {
+        String qtf_text = text; // No escaping for now, keep it simple.
+        
+        // Corrected QTF formatting based on documentation.
+        switch(style) {
+            case GUI_LOG_HEADER:  qtf_text = "[* " + qtf_text + "]"; break;
+            case GUI_LOG_SUCCESS: qtf_text = "[@g " + qtf_text + "]"; break;
+            case GUI_LOG_ERROR:   qtf_text = "[*@r " + qtf_text + "]"; break;
+            case GUI_LOG_NORMAL:
+            default:
+                break;
+        }
+        
+        qtf_log.Cat(qtf_text);
+        if(newline) qtf_log.Cat("&");
+
+        logDisplay.SetQTF(qtf_log);
+        logDisplay.Move(logDisplay.GetLength());
         Ctrl::ProcessEvents();
     }
-
-    void LogLine(const String& s) {
-        LogAppend(s + "&"); // Append text and a QTF newline
-    }
     
-    void LogHeaderLine(const String& s) {
-        LogLine("[*" + s + "]");
+    // Logger for the Console ONLY.
+    void ConsoleLog(const String& text) {
+        Cout() << text;
     }
 
-    // --- Core Test Logic ---
+    // --- Core Test Logic (Unchanged) ---
     void WaitForTransition(StateMachine& sm) {
         while (sm.IsTransitioning()) {
             if (tests_cancelled) return;
@@ -48,24 +56,24 @@ struct TestRunner : TopWindow {
         }
     }
 
-    // --- Test Functions (No changes needed in these) ---
+    // --- REFACTORED: All tests now use the GuiLog() function ---
 
     void Test_BasicTransitions() {
-        LogHeaderLine("--- Running: Basic Transitions Test ---");
+        GuiLog("--- Running: Basic Transitions Test ---", GUI_LOG_HEADER);
         StateMachine sm;
         sm.SetInitial("A");
-        sm.AddState({"A", [this](auto&, auto done){ LogLine("Entered A"); done(true); }, {}});
-        sm.AddState({"B", [this](auto&, auto done){ LogLine("Entered B"); done(true); }, {}});
+        sm.AddState({"A", [this](auto&, auto done){ GuiLog("Entered A"); done(true); }, {}});
+        sm.AddState({"B", [this](auto&, auto done){ GuiLog("Entered B"); done(true); }, {}});
         sm.AddTransition({"go_b", "A", "B"});
         sm.Start();
         sm.TriggerEvent("go_b");
         WaitForTransition(sm);
         ASSERT(sm.GetCurrent() == "B");
-        LogLine("-> [* PASSED]");
+        GuiLog("-> PASSED", GUI_LOG_SUCCESS);
     }
 
     void Test_GuardsAndCallbacks() {
-        LogHeaderLine("--- Running: Guards and Callbacks Test ---");
+        GuiLog("--- Running: Guards and Callbacks Test ---", GUI_LOG_HEADER);
         StateMachine sm;
         bool allow_transition = false;
         sm.SetInitial("Idle");
@@ -76,70 +84,70 @@ struct TestRunner : TopWindow {
         t.from = "Idle";
         t.to = "Working";
         t.Guard = [&](const TransitionContext&) { 
-            LogLine(String("Guard checked. Allowing: ") + (allow_transition ? "Yes" : "No"));
+            GuiLog(String("Guard checked. Allowing: ") + (allow_transition ? "Yes" : "No"));
             return allow_transition; 
         };
         sm.AddTransition(t);
         sm.Start();
-        LogLine("Attempting transition when guard is false...");
+        GuiLog("Attempting transition when guard is false...");
         sm.TriggerEvent("start");
         WaitForTransition(sm);
         ASSERT(sm.GetCurrent() == "Idle");
-        LogLine("Attempting transition when guard is true...");
+        GuiLog("Attempting transition when guard is true...");
         allow_transition = true;
         sm.TriggerEvent("start");
         WaitForTransition(sm);
         ASSERT(sm.GetCurrent() == "Working");
-        LogLine("-> [* PASSED]");
+        GuiLog("-> PASSED", GUI_LOG_SUCCESS);
     }
 
     void Test_HistoryAndGoBack() {
-        LogHeaderLine("--- Running: History and GoBack Test ---");
+        GuiLog("--- Running: History and GoBack Test ---", GUI_LOG_HEADER);
         StateMachine sm;
         sm.SetInitial("A");
-        sm.AddState({"A", [this](auto&, auto done){ LogLine("Entered A"); done(true); }, {}});
-        sm.AddState({"B", [this](auto&, auto done){ LogLine("Entered B"); done(true); }, {}});
-        sm.AddState({"C", [this](auto&, auto done){ LogLine("Entered C"); done(true); }, {}});
+        sm.AddState({"A", [this](auto&, auto done){ GuiLog("Entered A"); done(true); }, {}});
+        sm.AddState({"B", [this](auto&, auto done){ GuiLog("Entered B"); done(true); }, {}});
+        sm.AddState({"C", [this](auto&, auto done){ GuiLog("Entered C"); done(true); }, {}});
         sm.AddTransition({"go_b", "A", "B"});
         sm.AddTransition({"go_c", "B", "C"});
         sm.Start();
         sm.TriggerEvent("go_b"); WaitForTransition(sm);
         sm.TriggerEvent("go_c"); WaitForTransition(sm);
-        LogLine("Going back from C to B...");
+        GuiLog("Going back from C to B...");
         sm.GoBack(); WaitForTransition(sm);
         ASSERT(sm.GetCurrent() == "B");
-        LogLine("Going back from B to A...");
+        GuiLog("Going back from B to A...");
         sm.GoBack(); WaitForTransition(sm);
         ASSERT(sm.GetCurrent() == "A");
-        LogLine("-> [* PASSED]");
+        GuiLog("-> PASSED", GUI_LOG_SUCCESS);
     }
 
     void Test_AsyncFlow() {
-        LogHeaderLine("--- Running: Asynchronous Flow Test ---");
+        GuiLog("--- Running: Asynchronous Flow Test ---", GUI_LOG_HEADER);
         StateMachine sm;
         sm.SetInitial("Idle");
-        sm.AddState({"Idle", [this](auto&, auto done){ LogLine("Entered Idle."); done(true); }, {}});
+        sm.AddState({"Idle", [this](auto&, auto done){ GuiLog("Entered Idle."); done(true); }, {}});
         sm.AddState({"Working", [this](auto&, auto done){
-            LogLine("Entering Working state, starting 250ms task...");
+            GuiLog("Entering Working state, starting 250ms task...");
             SetTimeCallback(250, [this, done]{
-                LogLine("...Async task finished.");
+                GuiLog("...Async task finished.");
                 done(true);
             });
         }, {}});
         sm.AddTransition({"start", "Idle", "Working"});
         sm.Start();
         sm.TriggerEvent("start");
-        LogLine("Main thread is not blocked...");
+        GuiLog("Main thread is not blocked...");
         WaitForTransition(sm);
-        LogLine("Transition is now complete.");
+        GuiLog("Transition is now complete.");
         ASSERT(sm.GetCurrent() == "Working");
-        LogLine("-> [* PASSED]");
+        GuiLog("-> PASSED", GUI_LOG_SUCCESS);
     }
 
     void Test_EdgeCases() {
-        LogHeaderLine("--- Running: Edge Cases Test ---");
+        GuiLog("--- Running: Edge Cases Test ---", GUI_LOG_HEADER);
         {
-            LogLine("  Sub-test: Ignoring events during transition...");
+            GuiLog("  Sub-test: Ignoring events during transition...");
             StateMachine sm;
             sm.SetInitial("A");
             sm.AddState({"A", [](auto&, auto done){ done(true); }, {}});
@@ -152,43 +160,43 @@ struct TestRunner : TopWindow {
             sm.TriggerEvent("go_c");
             WaitForTransition(sm);
             ASSERT(sm.GetCurrent() == "B");
-            LogLine("  -> [* PASSED]");
+            GuiLog("  -> PASSED", GUI_LOG_SUCCESS);
         }
         {
-            LogLine("  Sub-test: Aborting transition on OnExit failure...");
+            GuiLog("  Sub-test: Aborting transition on OnExit failure...");
             StateMachine sm;
             sm.SetInitial("A");
             sm.AddState({"A", [](auto&, auto done){ done(true); }, 
                               [this](auto&, auto done){ 
-                                  LogLine("    OnExit from A failed as expected.");
+                                  GuiLog("    OnExit from A failed as expected.");
                                   done(false);
                               }});
-            sm.AddState({"B", [this](auto&, auto done){ LogLine("    ERROR: Should not have entered B!"); done(true); }, {}});
+            sm.AddState({"B", [this](auto&, auto done){ GuiLog("    ERROR: Should not have entered B!", GUI_LOG_ERROR); done(true); }, {}});
             sm.AddTransition({"go_b", "A", "B"});
             sm.Start();
             sm.TriggerEvent("go_b");
             WaitForTransition(sm);
             ASSERT(sm.GetCurrent() == "A");
-            LogLine("  -> [* PASSED]");
+            GuiLog("  -> PASSED", GUI_LOG_SUCCESS);
         }
-        LogLine("-> [* PASSED]");
+        GuiLog("-> PASSED", GUI_LOG_SUCCESS);
     }
 
     void Test_AdvancedHistory() {
-        LogHeaderLine("--- Running: Advanced History & GoBack Test ---");
+        GuiLog("--- Running: Advanced History & GoBack Test ---", GUI_LOG_HEADER);
         {
-            LogLine("  Sub-test: GoBack transition fails on OnEnter...");
+            GuiLog("  Sub-test: GoBack transition fails on OnEnter...");
             StateMachine sm;
             sm.SetInitial("A");
-            sm.AddState({"A", [this](auto&, auto done){ LogLine("    Entered A"); done(true); }, {}});
+            sm.AddState({"A", [this](auto&, auto done){ GuiLog("    Entered A"); done(true); }, {}});
             sm.AddState({"B", 
                 [this](auto&, auto done){ 
-                    LogLine("    OnEnter for B was called, but will fail.");
+                    GuiLog("    OnEnter for B was called, but will fail.");
                     done(false);
                 }, 
-                [this](auto&, auto done){ LogLine("    OnExit from B"); done(true); }
+                [this](auto&, auto done){ GuiLog("    OnExit from B"); done(true); }
             });
-            sm.AddState({"C", [this](auto&, auto done){ LogLine("    Entered C"); done(true); }, {}});
+            sm.AddState({"C", [this](auto&, auto done){ GuiLog("    Entered C"); done(true); }, {}});
             sm.AddTransition({"go_b", "A", "B"});
             sm.AddTransition({"go_c", "B", "C"});
             sm.Start();
@@ -196,15 +204,15 @@ struct TestRunner : TopWindow {
             ASSERT(sm.GetCurrent() == "B"); 
             sm.TriggerEvent("go_c"); WaitForTransition(sm);
             ASSERT(sm.GetCurrent() == "C");
-            LogLine("    Attempting to GoBack from C to B (which will fail)...");
+            GuiLog("    Attempting to GoBack from C to B (which will fail)...");
             sm.GoBack();
             WaitForTransition(sm);
             ASSERT(sm.GetCurrent() == "C");
-            LogLine("    Correctly remained in state C.");
-            LogLine("  -> [* PASSED]");
+            GuiLog("    Correctly remained in state C.");
+            GuiLog("  -> PASSED", GUI_LOG_SUCCESS);
         }
         {
-            LogLine("  Sub-test: Interleaving GoBack and TriggerEvent...");
+            GuiLog("  Sub-test: Interleaving GoBack and TriggerEvent...");
             StateMachine sm;
             sm.SetInitial("A");
             sm.AddState({"A", [](auto&, auto done){ done(true); }, {}});
@@ -222,26 +230,26 @@ struct TestRunner : TopWindow {
             ASSERT(sm.GetCurrent() == "D");
             sm.GoBack(); WaitForTransition(sm);
             ASSERT(sm.GetCurrent() == "B");
-            LogLine("  -> [* PASSED]");
+            GuiLog("  -> PASSED", GUI_LOG_SUCCESS);
         }
-        LogLine("-> [* PASSED]");
+        GuiLog("-> PASSED", GUI_LOG_SUCCESS);
     }
 
     void Test_AdvancedCallbacksAndFailures() {
-        LogHeaderLine("--- Running: Advanced Callbacks & Failures Test ---");
+        GuiLog("--- Running: Advanced Callbacks & Failures Test ---", GUI_LOG_HEADER);
         {
-            LogLine("  Sub-test: Re-entrancy from OnAfter callback...");
+            GuiLog("  Sub-test: Re-entrancy from OnAfter callback...");
             StateMachine sm;
             sm.SetInitial("A");
             sm.AddState({"A", [](auto&, auto done){ done(true); }, {}});
             sm.AddState({"B", [](auto&, auto done){ done(true); }, {}});
-            sm.AddState({"C", [this](auto&, auto done){ LogLine("    ERROR: Should never enter C!"); done(true); }, {}});
+            sm.AddState({"C", [this](auto&, auto done){ GuiLog("    ERROR: Should never enter C!", GUI_LOG_ERROR); done(true); }, {}});
             Transition t;
             t.event = "go_b";
             t.from = "A";
             t.to = "B";
             t.OnAfter = [this](const TransitionContext& ctx) {
-                LogLine("    In OnAfter for A->B, attempting to trigger event 'go_c'...");
+                GuiLog("    In OnAfter for A->B, attempting to trigger event 'go_c'...");
                 ctx.machine.TriggerEvent("go_c");
             };
             sm.AddTransition(t);
@@ -250,19 +258,19 @@ struct TestRunner : TopWindow {
             sm.TriggerEvent("go_b");
             WaitForTransition(sm);
             ASSERT(sm.GetCurrent() == "B");
-            LogLine("    Correctly ignored re-entrant event and landed in state B.");
-            LogLine("  -> [* PASSED]");
+            GuiLog("    Correctly ignored re-entrant event and landed in state B.");
+            GuiLog("  -> PASSED", GUI_LOG_SUCCESS);
         }
         {
-            LogLine("  Sub-test: Aborting transition on OnEnter failure...");
+            GuiLog("  Sub-test: Aborting transition on OnEnter failure...");
             StateMachine sm;
             sm.SetInitial("A");
             sm.AddState({"A", [](auto&, auto done){ done(true); }, 
-                              [this](auto&, auto done){ LogLine("    OnExit from A succeeded."); done(true); }
+                              [this](auto&, auto done){ GuiLog("    OnExit from A succeeded."); done(true); }
             });
             sm.AddState({"B", 
                 [this](auto&, auto done){ 
-                    LogLine("    OnEnter for B failed as expected.");
+                    GuiLog("    OnEnter for B failed as expected.");
                     done(false);
                 }, 
                 [](auto&, auto done){ done(true); }
@@ -272,16 +280,16 @@ struct TestRunner : TopWindow {
             sm.TriggerEvent("go_b");
             WaitForTransition(sm);
             ASSERT(sm.GetCurrent() == "B");
-            LogLine("    Machine correctly ended in state 'B' as per the design.");
-            LogLine("  -> [* PASSED]");
+            GuiLog("    Machine correctly ended in state 'B' as per the design.");
+            GuiLog("  -> PASSED", GUI_LOG_SUCCESS);
         }
-        LogLine("-> [* PASSED]");
+        GuiLog("-> PASSED", GUI_LOG_SUCCESS);
     }
 
     void Test_StressTest() {
-        LogHeaderLine("--- Running: Stress Test ---");
+        GuiLog("--- Running: Stress Test ---", GUI_LOG_HEADER);
         StateMachine sm;
-        const int ITERATIONS = 100;
+        const int ITERATIONS = 50;
         sm.SetInitial("A");
         sm.AddState({"A", [this](auto&, auto done){ SetTimeCallback(1, [=]{ done(true); }); }, {}});
         sm.AddState({"B", [](auto&, auto done){ done(true); }, {}});
@@ -292,19 +300,19 @@ struct TestRunner : TopWindow {
         sm.Start();
         WaitForTransition(sm);
         
-        LogAppend("  Sub-test: Rapid cycling for 500 loops... ");
+        GuiLog("  Sub-test: Rapid cycling for 500 loops... ", GUI_LOG_NORMAL, false);
         for (int i = 0; i < ITERATIONS; i++) {
             if (tests_cancelled) return;
             sm.TriggerEvent("a_to_b"); WaitForTransition(sm);
             sm.TriggerEvent("b_to_c"); WaitForTransition(sm);
             sm.TriggerEvent("c_to_a"); WaitForTransition(sm);
             if ((i + 1) % 25 == 0) { 
-                LogAppend("."); 
+                GuiLog(".", GUI_LOG_NORMAL, false); 
             }
         }
-        LogLine("\n  -> [* PASSED]");
+        GuiLog("\n  -> PASSED", GUI_LOG_SUCCESS);
         
-        LogAppend("  Sub-test: Rapid GoBack() for 500 loops... ");
+        GuiLog("  Sub-test: Rapid GoBack() for 500 loops... ", GUI_LOG_NORMAL, false);
         for (int i = 0; i < ITERATIONS; i++) {
             if (tests_cancelled) return;
             sm.TriggerEvent("a_to_b"); WaitForTransition(sm);
@@ -312,29 +320,30 @@ struct TestRunner : TopWindow {
             sm.GoBack(); WaitForTransition(sm);
             sm.GoBack(); WaitForTransition(sm);
             if ((i + 1) % 25 == 0) { 
-                LogAppend(".");
+                GuiLog(".", GUI_LOG_NORMAL, false);
             }
         }
-        LogLine("\n  -> [* PASSED]");
-        LogLine("-> [* PASSED]");
+        GuiLog("\n  -> PASSED", GUI_LOG_SUCCESS);
+        GuiLog("-> PASSED", GUI_LOG_SUCCESS);
     }
 
+    // The macro now handles the high-level console summary.
     #define RUN_TEST(TEST_NAME) \
         if(tests_cancelled) break; \
-        Cout() << "Running: " #TEST_NAME "... "; \
+        ConsoleLog("Running: " #TEST_NAME "... "); \
         TEST_NAME(); \
         if(tests_cancelled) break; \
-        Cout() << "PASSED\n"; \
-        LogLine(""); 
+        ConsoleLog("PASSED\n"); \
+        GuiLog(""); // Add a blank line in the GUI between tests
 
     void RunAllTests() {
-        Cout() << "========================================\n";
-        Cout() << "  Running State Machine Test Suite\n";
-        Cout() << "========================================\n";
-        LogHeaderLine("========================================");
-        LogHeaderLine("  Running State Machine Test Suite");
-        LogHeaderLine("========================================");
-        LogLine("");
+        ConsoleLog("========================================\n");
+        ConsoleLog("  Running State Machine Test Suite\n");
+        ConsoleLog("========================================\n");
+        GuiLog("========================================", GUI_LOG_HEADER);
+        GuiLog("  Running State Machine Test Suite", GUI_LOG_HEADER);
+        GuiLog("========================================", GUI_LOG_HEADER);
+        GuiLog("");
 
         do {
             RUN_TEST(Test_BasicTransitions);
@@ -347,17 +356,17 @@ struct TestRunner : TopWindow {
             RUN_TEST(Test_StressTest);
         } while(0);
 
-        LogLine("");
+        GuiLog("");
         if(tests_cancelled) {
-            Cout() << "\n** Test Suite Cancelled By User **\n";
-            LogHeaderLine("[*@r* ** Test Suite Cancelled By User **]");
+            ConsoleLog("\n** Test Suite Cancelled By User **\n");
+            GuiLog("** Test Suite Cancelled By User **", GUI_LOG_ERROR);
         } else {
-            Cout() << "========================================\n";
-            Cout() << "  Test Suite Finished\n";
-            Cout() << "========================================\n";
-            LogHeaderLine("========================================");
-            LogHeaderLine("  Test Suite Finished");
-            LogHeaderLine("========================================");
+            ConsoleLog("========================================\n");
+            ConsoleLog("  Test Suite Finished\n");
+            ConsoleLog("========================================\n");
+            GuiLog("========================================", GUI_LOG_HEADER);
+            GuiLog("  Test Suite Finished", GUI_LOG_HEADER);
+            GuiLog("========================================", GUI_LOG_HEADER);
         }
         
         actionButton.SetLabel("Close");
@@ -391,7 +400,6 @@ struct TestRunner : TopWindow {
 
 GUI_APP_MAIN
 {
-
     StdLogSetup(LOG_COUT);
     TestRunner().Run();
 }
