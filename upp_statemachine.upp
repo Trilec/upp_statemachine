@@ -1,8 +1,10 @@
-description "U++ asynchronous state machine with animation support";
+description "U++ asynchronous state machine with animation support\377";
 
 uses
 	Core,
-    CtrlLib;
+	CtrlLib,
+	RichEdit;
+
 include
 	,
 	/include;

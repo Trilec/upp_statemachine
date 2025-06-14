@@ -112,7 +112,7 @@ public:
     void RegisterView(const String& stateId, Ctrl* view);
     void EnableAnimation(bool b) { animate = b; }
     void SetFadeTime(int ms) { fade_time = ms; }
-
+in
 private:
     void OnStateChanged(const TransitionContext& ctx);
 

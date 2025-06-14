@@ -5,7 +5,6 @@ namespace Upp {
 TransitionContext::TransitionContext(StateMachine& m, String f, String t, String e)
     : machine(m), fromState(pick(f)), toState(pick(t)), event(pick(e)) {}
 
-// --- FIX: Use MakeOne to create objects managed by the smart pointer ---
 void StateMachine::AddState(State s) {
     states.Add(MakeOne<State>(pick(s)));
 }
@@ -81,7 +80,10 @@ const Transition* StateMachine::FindTransition(const String& from, const String&
 void StateMachine::DoTransition(const Transition& t, bool record) {
     const State* fromState = FindState(t.from);
     const State* toState   = FindState(t.to);
-    if (!fromState || !toState) return;
+    if (!fromState || !toState) {
+        LOG("Error: Transition specifies a non-existent state.");
+        return;
+    }
 
     transitioning = true;
     TransitionContext ctx(*this, t.from, t.to, t.event);
@@ -91,27 +93,40 @@ void StateMachine::DoTransition(const Transition& t, bool record) {
     if (t.OnBefore)
         t.OnBefore(ctx);
 
+    // This lambda is called AFTER the new state's OnEnter completes.
     auto on_enter_done = [this, ctx, record](bool success) {
         if (success) {
+            // Transition is fully successful. Now call final hooks.
             if (WhenTransitionFinished)
                 WhenTransitionFinished(ctx);
+            
+            // Find the original transition to fire its OnAfter hook.
+            if (const Transition* t_ptr = FindTransition(ctx.fromState, ctx.event)) {
+                if (t_ptr->OnAfter) {
+                    t_ptr->OnAfter(ctx);
+                }
+            }
+
             Finalize(ctx, record);
         }
+        // In all cases (success or failure), the transition process is over.
         transitioning = false;
     };
 
+    // This lambda is called AFTER the old state's OnExit completes.
     auto on_exit_done = [this, toState, ctx, on_enter_done](bool success) {
         if (success) {
+            // Exit was successful, update state and proceed to OnEnter.
             current = ctx.toState;
-            if (const Transition* t_ptr = FindTransition(ctx.fromState, ctx.event)) {
-                if (t_ptr->OnAfter) t_ptr->OnAfter(ctx);
-            }
             
             if (toState && toState->OnEnter)
                 toState->OnEnter(*this, on_enter_done);
             else
-                on_enter_done(true);
+                on_enter_done(true); // No OnEnter, proceed directly.
         } else {
+            // Exit failed, abort transition. Revert current state if needed.
+            // (For now, we just stop, but a more complex FSM might revert 'current')
+            LOG("Error: OnExit failed, transition aborted.");
             transitioning = false;
         }
     };
@@ -119,7 +134,7 @@ void StateMachine::DoTransition(const Transition& t, bool record) {
     if (fromState->OnExit)
         fromState->OnExit(*this, on_exit_done);
     else
-        on_exit_done(true);
+        on_exit_done(true); // No OnExit, proceed directly.
 }
 
 void StateMachine::Finalize(const TransitionContext& ctx, bool record) {
