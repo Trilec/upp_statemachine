@@ -1,19 +1,39 @@
-// main.cpp - Professional GUI Test harness for the StateMachine, now with a reusable LogView class.
+/**
+ * @file main.cpp
+ * @brief A professional GUI test harness for the StateMachine library.
+ *
+ * This application provides a comprehensive test suite for the StateMachine class,
+ * executing a series of validation tests in a user-friendly graphical interface.
+ * It features a custom LogView control for detailed, color-coded output and allows
+ * for real-time monitoring and cancellation of the test run.
+ */
 #include <CtrlLib/CtrlLib.h>
 #include <RichEdit/RichEdit.h>
 #include "statemachine.h"
 
 using namespace Upp;
 
-// =================================================================================
-// Our new, reusable LogView class that encapsulates all our "lessons learned".
-// =================================================================================
+//================================================================================================
+/**
+ * @class LogView
+ * @brief A specialized RichEdit control designed for displaying formatted log output.
+ *
+ * This class encapsulates all the setup and QTF formatting logic required to create
+ * a clean, readable, read-only log display. It provides a simple API for appending
+ * styled text, abstracting away the complexities of the underlying RichEdit control.
+ * This is a prime example of creating a "Facade" to simplify a complex component.
+ */
+//================================================================================================
 struct LogView : RichEdit {
 public:
-    // FIX: Renamed enum members to avoid collision with the Windows ERROR macro.
+    /// Defines the visual style for a log entry.
     enum LogStyle { LOG_NORMAL, LOG_HEADER, LOG_SUCCESS, LOG_ERROR };
 
-    // The constructor sets up the control with all our hard-won settings.
+    /**
+     * @brief Constructor that applies all our hard-won "lessons learned".
+     * Sets the control to be read-only, hides the ruler and non-printing characters,
+     * and initializes the font, creating a clean slate for logging.
+     */
     LogView() {
         SetReadOnly();
         NoRuler();
@@ -21,7 +41,12 @@ public:
         qtf_log_buffer = "[A1] "; // Initialize with 8pt Arial font.
     }
 
-    // A clean, public API for adding log entries.
+    /**
+     * @brief Appends a styled line of text to the log.
+     * @param text The string to be logged.
+     * @param style The visual style to apply (e.g., HEADER, SUCCESS).
+     * @param newline If true, a newline character is appended.
+     */
     void Log(const String& text, LogStyle style = LOG_NORMAL, bool newline = true) {
         String qtf_text = text;
         
@@ -42,39 +67,47 @@ public:
         Ctrl::ProcessEvents(); // Keep UI responsive during long tests.
     }
     
-    // A helper for adding visual separators.
+    /// @brief Adds a horizontal rule to the log for visual separation.
     void AddSeparator() {
         Log("[--]", LOG_NORMAL);
     }
     
-    // A method to clear the log if needed.
+    /// @brief Clears all content from the log view.
     void Clear() {
         qtf_log_buffer = "[A1] ";
         SetQTF(qtf_log_buffer);
     }
 
 private:
-    // The internal QTF string is now a private implementation detail.
+    /// The internal QTF string that acts as the data model for the control.
     String qtf_log_buffer;
 };
 
 
-// =================================================================================
-// Our test runner application window, now cleaner thanks to LogView.
-// =================================================================================
+//================================================================================================
+/**
+ * @class TestRunner
+ * @brief The main application window that hosts the LogView and runs the test suite.
+ *
+ * This class sets up the GUI layout, orchestrates the execution of all test functions,
+ * and handles user interaction like cancelling the test run.
+ */
+//================================================================================================
 struct TestRunner : TopWindow {
     typedef TestRunner CLASSNAME;
 
     Splitter      splitter;
-    LogView       logDisplay; // <-- Now using our new LogView class!
-    Button        actionButton;
+    LogView       logDisplay;     ///< Our custom control for displaying detailed test output.
+    Button        actionButton;   ///< The main button, used for cancelling or closing.
     
-    bool          tests_cancelled = false;
+    bool          tests_cancelled = false; ///< Flag to gracefully stop the test suite.
     
+    /// @brief Logs a simple message to the standard console output.
     void ConsoleLog(const String& text) {
         Cout() << text;
     }
 
+    /// @brief Pauses execution until the state machine is idle (not in a transition).
     void WaitForTransition(StateMachine& sm) {
         while (sm.IsTransitioning()) {
             if (tests_cancelled) return;
@@ -83,8 +116,13 @@ struct TestRunner : TopWindow {
         }
     }
 
-    // --- All tests now use the clean logDisplay.Log() API ---
+    // --- Test Suite ---
+    // Each function below tests a specific feature of the StateMachine library.
 
+    /**
+     * @brief Verifies the core functionality of state transitions.
+     * Ensures the machine can move from one state to another via a triggered event.
+     */
     void Test_BasicTransitions() {
         logDisplay.Log("Running: Basic Transitions Test", LogView::LOG_HEADER);
         StateMachine sm;
@@ -99,6 +137,11 @@ struct TestRunner : TopWindow {
         logDisplay.Log("  -> PASSED", LogView::LOG_SUCCESS);
     }
 
+    /**
+     * @brief Validates the behavior of transition guards.
+     * Checks that a transition is correctly allowed or blocked based on the boolean
+     * return value of its guard function.
+     */
     void Test_GuardsAndCallbacks() {
         logDisplay.Log("Running: Guards and Callbacks Test", LogView::LOG_HEADER);
         StateMachine sm;
@@ -128,6 +171,11 @@ struct TestRunner : TopWindow {
         logDisplay.Log("  -> PASSED", LogView::LOG_SUCCESS);
     }
 
+    /**
+     * @brief Tests the state history and the GoBack() functionality.
+     * Ensures the machine correctly records its state path and can revert to the
+     * previous state upon request.
+     */
     void Test_HistoryAndGoBack() {
         logDisplay.Log("Running: History and GoBack Test", LogView::LOG_HEADER);
         StateMachine sm;
@@ -149,6 +197,11 @@ struct TestRunner : TopWindow {
         logDisplay.Log("  -> PASSED", LogView::LOG_SUCCESS);
     }
 
+    /**
+     * @brief Verifies support for asynchronous operations within states.
+     * Tests that a state's OnEnter handler can perform a timed task without blocking
+     * the main thread, and correctly signal completion.
+     */
     void Test_AsyncFlow() {
         logDisplay.Log("Running: Asynchronous Flow Test", LogView::LOG_HEADER);
         StateMachine sm;
@@ -171,6 +224,11 @@ struct TestRunner : TopWindow {
         logDisplay.Log("  -> PASSED", LogView::LOG_SUCCESS);
     }
 
+    /**
+     * @brief Probes various edge cases and failure conditions.
+     * Includes tests for ignoring events during a transition and correctly aborting
+     * a transition if an OnExit handler fails.
+     */
     void Test_EdgeCases() {
         logDisplay.Log("Running: Edge Cases Test", LogView::LOG_HEADER);
         {
@@ -209,6 +267,11 @@ struct TestRunner : TopWindow {
         logDisplay.Log("  -> PASSED", LogView::LOG_SUCCESS);
     }
 
+    /**
+     * @brief Performs more complex tests on the history stack.
+     * Checks failure conditions during a GoBack() operation and ensures the history
+     * remains consistent when interleaved with normal event triggers.
+     */
     void Test_AdvancedHistory() {
         logDisplay.Log("Running: Advanced History & GoBack Test", LogView::LOG_HEADER);
         {
@@ -262,6 +325,11 @@ struct TestRunner : TopWindow {
         logDisplay.Log("  -> PASSED", LogView::LOG_SUCCESS);
     }
 
+    /**
+     * @brief Tests complex callback scenarios and failure modes.
+     * Ensures re-entrant event triggers from callbacks are ignored and that the machine
+     * correctly handles a failed OnEnter callback as per the design specification.
+     */
     void Test_AdvancedCallbacksAndFailures() {
         logDisplay.Log("Running: Advanced Callbacks & Failures Test", LogView::LOG_HEADER);
         {
@@ -313,6 +381,11 @@ struct TestRunner : TopWindow {
         logDisplay.Log("  -> PASSED", LogView::LOG_SUCCESS);
     }
 
+    /**
+     * @brief Puts the state machine under high load to test stability.
+     * Executes a high number of rapid transitions and GoBack() calls to check for
+     * race conditions, memory leaks, or performance degradation.
+     */
     void Test_StressTest() {
         logDisplay.Log("Running: Stress Test", LogView::LOG_HEADER);
         StateMachine sm;
@@ -354,6 +427,7 @@ struct TestRunner : TopWindow {
         logDisplay.Log("  -> PASSED", LogView::LOG_SUCCESS);
     }
 
+    /// @brief A macro to simplify running a test and logging its console status.
     #define RUN_TEST(TEST_NAME) \
         if(tests_cancelled) break; \
         ConsoleLog("Running: " #TEST_NAME "... "); \
@@ -362,6 +436,11 @@ struct TestRunner : TopWindow {
         ConsoleLog("PASSED\n"); \
         logDisplay.AddSeparator();
 
+    /**
+     * @brief Executes all defined test functions in sequence.
+     * This is the main test orchestration method. It logs the overall progress
+     * and final status to both the GUI and the console.
+     */
     void RunAllTests() {
         ConsoleLog("========================================\n");
         ConsoleLog("  Running State Machine Test Suite\n");
@@ -397,12 +476,14 @@ struct TestRunner : TopWindow {
         Title("State Machine Test Suite - Finished");
     }
 
+    /// @brief Sets the cancellation flag and updates the GUI to reflect it.
     void CancelTests() {
         tests_cancelled = true;
         actionButton.Disable();
         actionButton.SetLabel("Cancelling...");
     }
 
+    /// @brief Constructor for the main application window.
     TestRunner() {
         Title("State Machine Test Suite - Running...").Sizeable().Zoomable();
         SetRect(0, 0, 800, 600);
@@ -414,10 +495,14 @@ struct TestRunner : TopWindow {
         actionButton.SetLabel("Cancel");
         actionButton <<= THISBACK(CancelTests);
 
+        // Schedule the test suite to run after the window is created and displayed.
         PostCallback(THISBACK(RunAllTests));
     }
 };
 
+/**
+ * @brief The main entry point for the U++ GUI application.
+ */
 GUI_APP_MAIN
 {
     StdLogSetup(LOG_COUT);
