@@ -39,6 +39,9 @@ upp_statemachine/
 - The library sources live in `statemachine/`.
 - The demo and tests are split into separate U++ packages.
 - Project documentation is now concentrated in `docs/`.
+- `Start()` and `TriggerEvent()` return `bool`.
+- `IsStarted()` reports whether startup has completed successfully.
+- Event queueing and transition cancellation are not implemented yet.
 
 ## License
 

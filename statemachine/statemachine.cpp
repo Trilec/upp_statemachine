@@ -9,7 +9,7 @@
   Usage:
     1) Define machine and initial state
        StateMachine fsm;
-       fsm.initial = "Idle";
+       fsm.SetInitial("Idle");
 
     2) Add states
        // "Idle": no entry/exit behavior
@@ -20,9 +20,9 @@
     3) Add transitions
        // Idle --"start"--> Working
        fsm.AddTransition({
+         "start",     // event
          "Idle",      // from
          "Working",   // to
-         "start",     // event
          nullptr,     // guard
          nullptr,     // onBefore
          nullptr      // onAfter
@@ -35,7 +35,7 @@
   UI Example: switch panels on button click
     // assume TopWindow has two panels: panelA, panelB and a Button btn
     StateMachine uiFsm;
-    uiFsm.initial = "A";
+    uiFsm.SetInitial("A");
     uiFsm.AddState({ "A",
       [&](StateMachine&, Function<void(bool)> done){
         panelA.Show(); panelB.Hide();
@@ -50,8 +50,8 @@
       },
       nullptr
     });
-    uiFsm.AddTransition({ "A","B","toB", nullptr,nullptr,nullptr });
-    uiFsm.AddTransition({ "B","A","toA", nullptr,nullptr,nullptr });
+    uiFsm.AddTransition({ "toB", "A", "B", nullptr, nullptr, nullptr });
+    uiFsm.AddTransition({ "toA", "B", "A", nullptr, nullptr, nullptr });
     uiFsm.Start();
     btn <<= [&]{ uiFsm.TriggerEvent("toB"); };
 */
@@ -89,39 +89,75 @@ void StateMachine::AddTransition(Transition t) {
 //------------------------------------------------------------------------------
 // Begin the state machine in its initial state
 //------------------------------------------------------------------------------
-void StateMachine::Start() {
+bool StateMachine::Start() {
     ASSERT(!initial.IsEmpty());
+    if (initial.IsEmpty() || started || transitioning)
+        return false;
+
     const State* init = FindState(initial);
     ASSERT(init);
+    if (!init)
+        return false;
 
-    current = initial;
-    transitionHistory.Add(MakeOne<TransitionRecord>("", initial, "__start"));
+    const String start_initial = initial;
+    started = true;
+    transitioning = true;
+    current = start_initial;
+
+    auto finish_start = [this, start_initial](bool success) {
+        if (success) {
+            transitionHistory.Add(MakeOne<TransitionRecord>("", start_initial, "__start"));
+            transitioning = false;
+            return;
+        }
+
+        transitioning = false;
+        started = false;
+        current.Clear();
+        transitionHistory.Clear();
+    };
 
     if (init->OnEnter)
-        init->OnEnter(*this, [](bool){});
+        init->OnEnter(*this, [this, finish_start](bool success) {
+            finish_start(success);
+        });
+    else
+        finish_start(true);
+
+    return true;
 }
 
 //------------------------------------------------------------------------------
 // Trigger an event by name
 //------------------------------------------------------------------------------
-void StateMachine::TriggerEvent(const String& e) {
-    if (transitioning) return;
+bool StateMachine::TriggerEvent(const String& e) {
+    if (!started || transitioning)
+        return false;
 
     const Transition* t = FindTransition(current, e);
-    if (!t) return;
+    if (!t)
+        return false;
 
     TransitionContext ctx(*this, t->from, t->to, t->event);
     if (t->Guard && !t->Guard(ctx))
-        return;
+        return false;
 
     DoTransition(*t);
+    return true;
 }
 
 //------------------------------------------------------------------------------
 // Attempt a transition by descriptor
 //------------------------------------------------------------------------------
 bool StateMachine::TryTransition(const Transition& t) {
-    if (transitioning) return false;
+    if (!started || transitioning)
+        return false;
+
+    if (t.from != current)
+        return false;
+
+    if (!FindState(t.to))
+        return false;
 
     TransitionContext ctx(*this, t.from, t.to, t.event);
     if (t.Guard && !t.Guard(ctx))
@@ -197,14 +233,13 @@ void StateMachine::DoTransition(const Transition& t,
         t.OnBefore(ctx);
 
     // Chain exit → enter → after → finalize
-    auto on_enter_done = [this, ctx, record, on_done](bool success) {
+    auto on_enter_done = [this, ctx, record, on_done, t](bool success) {
         if (success) {
             if (WhenTransitionFinished)
                 WhenTransitionFinished(ctx);
 
-            if (const Transition* tp = FindTransition(ctx.fromState, ctx.event))
-                if (tp->OnAfter)
-                    tp->OnAfter(ctx);
+            if (t.OnAfter)
+                t.OnAfter(ctx);
 
             Finalize(ctx, record);
         }

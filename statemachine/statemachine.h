@@ -2,7 +2,7 @@
 // Asynchronous, event-driven FSM for U++
 // -------------------------------------------------------
 // Lightweight finite-state-machine helper for orchestrating UI / logic flow in
-// Ultimate++ applications.  100% header-only, no external dependencies.
+// Ultimate++ applications. No external dependencies.
 //
 // Overview:
 //   • Event-based transitions via TriggerEvent()
@@ -78,16 +78,19 @@ namespace Upp {
 	    void AddTransition(Transition t);
 	
 	    /// Start the machine in the 'initial' state
-	    void Start();
+	    bool Start();
 	
 	    /// Trigger a named event, causing a transition if defined
-	    void TriggerEvent(const String& e);
+	    bool TriggerEvent(const String& e);
 	
 	    /// Attempt the given transition directly
 	    bool TryTransition(const Transition& t);
 	
 	    /// Get current state ID
 	    String GetCurrent() const                { return current; }
+
+	    /// True if Start() has completed successfully
+	    bool IsStarted() const                   { return started; }
 	
 	    /// True if an async transition is in progress
 	    bool IsTransitioning() const             { return transitioning; }
@@ -129,6 +132,7 @@ namespace Upp {
 	
 	    String current;
 	    String initial;
+	    bool   started = false;
 	    bool   transitioning = false;
 	};
 
