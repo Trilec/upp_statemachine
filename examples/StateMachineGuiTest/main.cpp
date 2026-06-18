@@ -10,7 +10,7 @@
 
 #include <CtrlLib/CtrlLib.h>
 #include <RichEdit/RichEdit.h>
-#include "statemachine.h"
+#include <statemachine/statemachine.h>
 
 using namespace Upp;
 

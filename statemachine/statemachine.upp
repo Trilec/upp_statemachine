@@ -1,0 +1,8 @@
+description "U++ asynchronous finite state machine";
+
+uses
+    Core;
+
+file
+    statemachine.h,
+    statemachine.cpp;

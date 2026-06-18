@@ -1,0 +1,12 @@
+uses
+    Core,
+    CtrlCore,
+    CtrlLib,
+    RichEdit,
+    statemachine;
+
+file
+    main.cpp;
+
+mainconfig
+    "" = "GUI";

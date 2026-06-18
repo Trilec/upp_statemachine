@@ -1,4 +1,5 @@
-// StateMachine.h – Asynchronous, event-driven FSM for U++
+// statemachine/statemachine.h
+// Asynchronous, event-driven FSM for U++
 // -------------------------------------------------------
 // Lightweight finite-state-machine helper for orchestrating UI / logic flow in
 // Ultimate++ applications.  100% header-only, no external dependencies.
