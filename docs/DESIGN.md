@@ -49,9 +49,19 @@ state without exposing the caller to the internal transition machinery.
 
 ## Current hardening notes
 
+- `AddState()` returns `bool`.
+- `AddState()` rejects empty ids, duplicate ids, and late additions after start.
+- `AddTransition()` returns `bool`.
+- `AddTransition()` rejects empty fields, missing endpoint states, duplicate `from` + `event` pairs, and late additions after start.
 - `Start()` returns `bool`.
 - `TriggerEvent()` returns `bool`.
-- `IsStarted()` indicates whether startup completed successfully.
+- `TriggerEvent()` validates source and target before it can succeed.
+- `IsStarted()` means `Start()` has been accepted and the machine owns a current initial state.
+- During async initial `OnEnter`, `IsStarted()` and `IsTransitioning()` are both `true`.
+- If initial `OnEnter` later fails, startup rolls back and `IsStarted()` becomes `false`.
+- Machine-owned completion callbacks are single-shot.
+- History inspection helpers expose the recorded entries for tests and diagnostics.
+- Logging is opt-in; normal transition flow is quiet unless enabled.
 - `TryTransition()` requires `t.from == current`.
 - `OnAfter` runs from the exact transition object passed into `DoTransition()`.
 - Event queueing is not implemented.

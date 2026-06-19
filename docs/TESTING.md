@@ -39,7 +39,9 @@ ALL TESTS PASSED
 ## Coverage notes
 
 - `tests/StateMachineCoreTest` covers startup, transitions, history, callback ordering, async completion, and stress cases.
+- Async completion callbacks are tested as single-shot.
 - `Start()` is tested as a transition phase for initial entry.
 - `TryTransition()` is tested with the current-state check.
 - `OnAfter` is tested against the exact transition object.
+- Logging is expected to stay quiet by default in the console suite.
 - Event queueing and transition cancellation remain unimplemented and should not be tested as existing behavior.

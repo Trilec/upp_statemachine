@@ -71,25 +71,31 @@ namespace Upp {
 	    /// Set the initial state by its ID
 	    void SetInitial(const String& id)        { initial = id; }
 	
-	    /// Add a state definition
-	    void AddState(State s);
+	    /// Add a state definition. Returns false for invalid or late additions.
+	    bool AddState(State s);
 	
-	    /// Add a transition definition
-	    void AddTransition(Transition t);
+	    /// Add a transition definition. Returns false for invalid or late additions.
+	    bool AddTransition(Transition t);
 	
 	    /// Start the machine in the 'initial' state
 	    bool Start();
 	
 	    /// Trigger a named event, causing a transition if defined
 	    bool TriggerEvent(const String& e);
-	
+
 	    /// Attempt the given transition directly
 	    bool TryTransition(const Transition& t);
+
+	    /// Enable or disable internal logging
+	    void EnableLogging(bool b = true)   { logging = b; }
+
+	    /// True if internal logging is enabled
+	    bool IsLoggingEnabled() const       { return logging; }
 	
 	    /// Get current state ID
 	    String GetCurrent() const                { return current; }
 
-	    /// True if Start() has completed successfully
+	    /// True if Start() has been accepted and the machine owns a current initial state
 	    bool IsStarted() const                   { return started; }
 	
 	    /// True if an async transition is in progress
@@ -97,15 +103,21 @@ namespace Upp {
 	
 	    /// True if you can call GoBack()
 	    bool CanGoBack() const                   { return transitionHistory.GetCount() > 1; }
+
+	    /// History inspection for tests and diagnostics
+	    int GetHistoryCount() const              { return transitionHistory.GetCount(); }
+	    String GetHistoryFrom(int i) const       { return (i >= 0 && i < transitionHistory.GetCount()) ? transitionHistory[i]->from : String(); }
+	    String GetHistoryTo(int i) const         { return (i >= 0 && i < transitionHistory.GetCount()) ? transitionHistory[i]->to : String(); }
+	    String GetHistoryEvent(int i) const      { return (i >= 0 && i < transitionHistory.GetCount()) ? transitionHistory[i]->event : String(); }
 	
 	    /// Revert to the previous state (if history allows)
 	    void GoBack();
 	
 	    /// Called just before any transition begins
-	    Callback1<const TransitionContext&> WhenTransitionStarted;
+	    Function<void(const TransitionContext&)> WhenTransitionStarted;
 	
 	    /// Called just after any transition completes
-	    Callback1<const TransitionContext&> WhenTransitionFinished;
+	    Function<void(const TransitionContext&)> WhenTransitionFinished;
 	
 	    /// Dump history to LOG()
 	    void DumpHistory() const {
@@ -129,11 +141,12 @@ namespace Upp {
 	    Vector< One<State> >            states;
 	    Vector< One<Transition> >       transitions;
 	    Vector< One<TransitionRecord> > transitionHistory;
-	
+
 	    String current;
 	    String initial;
 	    bool   started = false;
 	    bool   transitioning = false;
+	    bool   logging = false;
 	};
 
 } // namespace Upp

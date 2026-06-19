@@ -48,8 +48,8 @@ Stores a completed transition for history and `GoBack()`.
 ### Configuration
 
 - `SetInitial(const String& id)`
-- `AddState(State s)`
-- `AddTransition(Transition t)`
+- `AddState(State s) -> bool`
+- `AddTransition(Transition t) -> bool`
 
 ### Execution
 
@@ -64,6 +64,12 @@ Stores a completed transition for history and `GoBack()`.
 - `IsStarted() const`
 - `IsTransitioning() const`
 - `CanGoBack() const`
+- `GetHistoryCount() const`
+- `GetHistoryFrom(int i) const`
+- `GetHistoryTo(int i) const`
+- `GetHistoryEvent(int i) const`
+- `EnableLogging(bool b = true)`
+- `IsLoggingEnabled() const`
 
 ### Hooks
 
@@ -80,17 +86,19 @@ is ignored or blocked.
 3. The machine searches for a transition where:
    - `transition.from == current state`
    - `transition.event == event`
-4. If no transition exists, nothing happens.
+4. If the source state or target state does not exist, nothing happens.
 5. If a guard exists and returns false, nothing happens.
-6. `WhenTransitionStarted` is called.
-7. The transition `OnBefore` callback is called.
-8. The current state's `OnExit` callback is called.
-9. The target state's `OnEnter` callback is called.
-10. If `OnEnter` succeeds, the current state is updated.
-11. `WhenTransitionFinished` is called.
-12. The transition `OnAfter` callback is called.
-13. The transition is recorded in history.
-14. The transitioning flag is cleared.
+6. `TriggerEvent()` only returns `true` after the source and target have been
+   validated and the guard has allowed the transition.
+7. `WhenTransitionStarted` is called.
+8. The transition `OnBefore` callback is called.
+9. The current state's `OnExit` callback is called.
+10. The target state's `OnEnter` callback is called.
+11. If `OnEnter` succeeds, the current state is updated.
+12. `WhenTransitionFinished` is called.
+13. The transition `OnAfter` callback is called.
+14. The transition is recorded in history.
+15. The transitioning flag is cleared.
 
 ## Callback order
 
@@ -135,8 +143,65 @@ On success:
 - `current` is set to the initial state
 - a `__start` history record is added
 
+`Start()` returning `true` means startup has been accepted.
+`IsStarted()` means `Start()` has been accepted and the machine owns a current
+initial state.
+`IsTransitioning()` means startup or a transition is currently in progress.
+
+If the initial `OnEnter` is asynchronous, startup may still be in progress
+after `Start()` returns `true`. During that time `IsStarted()` is `true`,
+`IsTransitioning()` is `true`, and `GetCurrent() == initial`.
+
+If the initial `OnEnter` later fails, startup rolls back and `IsStarted()`
+becomes `false`.
+
+Machine-owned completion callbacks are single-shot: the first `done(true/false)`
+wins and duplicate completions are ignored.
+
 If the initial state has no `OnEnter`, startup completes immediately with
 `started == true`, `current == initial`, and `transitioning == false`.
+
+## AddState(state)
+
+`AddState()` returns `true` when the state is accepted and `false` when:
+
+- `state.id` is empty
+- `state.id` already exists
+- the machine has already been started
+
+## History accessors
+
+The history accessors are read-only helpers for tests and diagnostics.
+
+- `GetHistoryCount()` returns the number of recorded history entries.
+- `GetHistoryFrom(i)` returns the `from` field for entry `i`, or an empty
+  `String` if `i` is invalid.
+- `GetHistoryTo(i)` returns the `to` field for entry `i`, or an empty `String`
+  if `i` is invalid.
+- `GetHistoryEvent(i)` returns the `event` field for entry `i`, or an empty
+  `String` if `i` is invalid.
+
+## Logging
+
+Logging is disabled by default.
+
+- `EnableLogging(true)` turns on internal transition logging.
+- `EnableLogging(false)` turns it off again.
+- Normal transitions and transition errors stay quiet unless logging is enabled.
+- `DumpHistory()` still logs explicitly when called.
+
+## AddTransition(transition)
+
+`AddTransition()` returns `true` when the transition is accepted and `false`
+when:
+
+- `transition.event` is empty
+- `transition.from` is empty
+- `transition.to` is empty
+- `transition.from` does not exist
+- `transition.to` does not exist
+- a transition with the same `from` and `event` already exists
+- the machine has already been started
 
 ## Current limitations
 

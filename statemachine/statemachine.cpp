@@ -60,6 +60,8 @@
 
 #include "statemachine.h"
 
+#include <memory>
+
 namespace Upp {
 
 //------------------------------------------------------------------------------
@@ -75,36 +77,53 @@ TransitionContext::TransitionContext(StateMachine& m, String f, String t, String
 //------------------------------------------------------------------------------
 // Add a new state definition
 //------------------------------------------------------------------------------
-void StateMachine::AddState(State s) {
+bool StateMachine::AddState(State s) {
+    if (started || s.id.IsEmpty() || FindState(s.id))
+        return false;
+
     states.Add(MakeOne<State>(pick(s)));
+    return true;
 }
 
 //------------------------------------------------------------------------------
 // Add a new transition definition
 //------------------------------------------------------------------------------
-void StateMachine::AddTransition(Transition t) {
+bool StateMachine::AddTransition(Transition t) {
+    if (started || t.event.IsEmpty() || t.from.IsEmpty() || t.to.IsEmpty())
+        return false;
+
+    if (!FindState(t.from) || !FindState(t.to))
+        return false;
+
+    if (FindTransition(t.from, t.event))
+        return false;
+
     transitions.Add(MakeOne<Transition>(pick(t)));
+    return true;
 }
 
 //------------------------------------------------------------------------------
 // Begin the state machine in its initial state
 //------------------------------------------------------------------------------
 bool StateMachine::Start() {
-    ASSERT(!initial.IsEmpty());
     if (initial.IsEmpty() || started || transitioning)
         return false;
 
     const State* init = FindState(initial);
-    ASSERT(init);
     if (!init)
         return false;
 
     const String start_initial = initial;
+    auto start_finished = std::make_shared<bool>(false);
     started = true;
     transitioning = true;
     current = start_initial;
 
-    auto finish_start = [this, start_initial](bool success) {
+    auto finish_start = [this, start_initial, start_finished](bool success) {
+        if (*start_finished)
+            return;
+        *start_finished = true;
+
         if (success) {
             transitionHistory.Add(MakeOne<TransitionRecord>("", start_initial, "__start"));
             transitioning = false;
@@ -136,6 +155,11 @@ bool StateMachine::TriggerEvent(const String& e) {
 
     const Transition* t = FindTransition(current, e);
     if (!t)
+        return false;
+
+    const State* from_state = FindState(t->from);
+    const State* to_state = FindState(t->to);
+    if (!from_state || !to_state)
         return false;
 
     TransitionContext ctx(*this, t->from, t->to, t->event);
@@ -184,7 +208,8 @@ void StateMachine::GoBack() {
     DoTransition(back_transition, false, [this](bool success) {
         if (success) {
             transitionHistory.Pop();
-            DumpHistory();
+            if (logging)
+                DumpHistory();
         }
     });
 }
@@ -213,16 +238,20 @@ void StateMachine::DoTransition(const Transition& t,
                                 bool record,
                                 Function<void(bool)> on_done)
 {
-    LOG(Format("DoTransition: %s -> %s, record=%d", t.from, t.to, int(record)));
+    if (logging)
+        LOG(Format("DoTransition: %s -> %s, record=%d", t.from, t.to, int(record)));
 
     const State* fromState = FindState(t.from);
     const State* toState   = FindState(t.to);
     if (!fromState || !toState) {
-        LOG("Error: Transition specifies a non-existent state.");
+        if (logging)
+            LOG("Error: Transition specifies a non-existent state.");
         if (on_done) on_done(false);
         return;
     }
 
+    auto enter_finished = std::make_shared<bool>(false);
+    auto exit_finished  = std::make_shared<bool>(false);
     transitioning = true;
     TransitionContext ctx(*this, t.from, t.to, t.event);
 
@@ -233,7 +262,11 @@ void StateMachine::DoTransition(const Transition& t,
         t.OnBefore(ctx);
 
     // Chain exit → enter → after → finalize
-    auto on_enter_done = [this, ctx, record, on_done, t](bool success) {
+    auto on_enter_done = [this, ctx, record, on_done, t, enter_finished](bool success) {
+        if (*enter_finished)
+            return;
+        *enter_finished = true;
+
         if (success) {
             if (WhenTransitionFinished)
                 WhenTransitionFinished(ctx);
@@ -247,25 +280,33 @@ void StateMachine::DoTransition(const Transition& t,
         if (on_done) on_done(success);
     };
 
-    auto on_exit_done = [this, toState, ctx, on_enter_done](bool success) {
+    auto on_exit_done = [this, toState, ctx, on_enter_done, exit_finished](bool success) {
+        if (*exit_finished)
+            return;
+        *exit_finished = true;
+
         if (success) {
             if (toState && toState->OnEnter) {
                 toState->OnEnter(*this, [this, ctx, on_enter_done](bool enter_success) {
                     if (enter_success)
                         current = ctx.toState;
-                    LOG("Transition " + String(enter_success ? "succeeded" : "failed") +
-                        ": now in state " + current);
+                    if (logging) {
+                        LOG("Transition " + String(enter_success ? "succeeded" : "failed") +
+                            ": now in state " + current);
+                    }
                     on_enter_done(enter_success);
                 });
             }
             else {
                 current = ctx.toState;
-                LOG("Transition succeeded: now in state " + current);
+                if (logging)
+                    LOG("Transition succeeded: now in state " + current);
                 on_enter_done(true);
             }
         }
         else {
-            LOG("Error: OnExit failed, transition aborted.");
+            if (logging)
+                LOG("Error: OnExit failed, transition aborted.");
             transitioning = false;
             on_enter_done(false);
         }
@@ -282,7 +323,8 @@ void StateMachine::DoTransition(const Transition& t,
 // Record history and dump if needed
 //------------------------------------------------------------------------------
 void StateMachine::Finalize(const TransitionContext& ctx, bool record) {
-    LOG(Format("Finalize: %s -> %s, record=%d", ctx.fromState, ctx.toState, int(record)));
+    if (logging)
+        LOG(Format("Finalize: %s -> %s, record=%d", ctx.fromState, ctx.toState, int(record)));
 
     if (record) {
         // prune any divergent history
@@ -293,7 +335,8 @@ void StateMachine::Finalize(const TransitionContext& ctx, bool record) {
         }
         transitionHistory.Add(
             MakeOne<TransitionRecord>(ctx.fromState, ctx.toState, ctx.event));
-        DumpHistory();
+        if (logging)
+            DumpHistory();
     }
 }
 

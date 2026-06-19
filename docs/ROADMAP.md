@@ -5,6 +5,7 @@
 - Event queueing
 - Transition cancellation
 - Safer async lifetime guards
+- Richer transition diagnostics
 - Hierarchical states
 - StateViewManager
 - Code generation helpers
