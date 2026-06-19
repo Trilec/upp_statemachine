@@ -41,6 +41,9 @@ upp_statemachine/
 - Project documentation is now concentrated in `docs/`.
 - `Start()` and `TriggerEvent()` return `bool`.
 - `IsStarted()` reports whether startup has completed successfully.
+- `Start()` treats the initial `OnEnter` as a transition phase.
+- `TryTransition()` requires `t.from == current`.
+- `OnAfter` uses the exact transition object passed in.
 - Event queueing and transition cancellation are not implemented yet.
 
 ## License
