@@ -25,6 +25,25 @@
 
 namespace Upp {
 
+	enum class StateMachineError {
+		None,
+		EmptyStateId,
+		DuplicateStateId,
+		EmptyEvent,
+		EmptyFromState,
+		EmptyToState,
+		MissingState,
+		MissingFromState,
+		MissingToState,
+		DuplicateTransition,
+		AlreadyStarted,
+		NotStarted,
+		TransitionInProgress,
+		NoMatchingTransition,
+		GuardRejected,
+		WrongSourceState,
+	};
+
 	// Forward declaration
 	class StateMachine;
 	
@@ -76,6 +95,18 @@ namespace Upp {
 	
 	    /// Add a transition definition. Returns false for invalid or late additions.
 	    bool AddTransition(Transition t);
+
+	    /// Check whether a state exists.
+	    bool HasState(const String& id) const;
+
+	    /// Check whether a transition exists.
+	    bool HasTransition(const String& from, const String& event) const;
+
+	    /// Get the number of configured states.
+	    int GetStateCount() const;
+
+	    /// Get the number of configured transitions.
+	    int GetTransitionCount() const;
 	
 	    /// Start the machine in the 'initial' state
 	    bool Start();
@@ -104,6 +135,15 @@ namespace Upp {
 	    /// True if you can call GoBack()
 	    bool CanGoBack() const                   { return transitionHistory.GetCount() > 1; }
 
+	    /// Current error code from the last failing public call
+	    StateMachineError GetLastError() const    { return last_error; }
+
+	    /// Stable human-readable description of the last error
+	    String GetLastErrorText() const;
+
+	    /// Clear the last error
+	    void ClearError()                        { last_error = StateMachineError::None; }
+
 	    /// History inspection for tests and diagnostics
 	    int GetHistoryCount() const              { return transitionHistory.GetCount(); }
 	    String GetHistoryFrom(int i) const       { return (i >= 0 && i < transitionHistory.GetCount()) ? transitionHistory[i]->from : String(); }
@@ -111,7 +151,13 @@ namespace Upp {
 	    String GetHistoryEvent(int i) const      { return (i >= 0 && i < transitionHistory.GetCount()) ? transitionHistory[i]->event : String(); }
 	
 	    /// Revert to the previous state (if history allows)
-	    void GoBack();
+	    bool GoBack();
+
+	    /// Reset runtime state while keeping configuration
+	    bool Reset();
+
+	    /// Clear all runtime state and configuration
+	    bool Clear();
 	
 	    /// Called just before any transition begins
 	    Function<void(const TransitionContext&)> WhenTransitionStarted;
@@ -132,7 +178,7 @@ namespace Upp {
 	    const State*       FindState(const String& id) const;
 	    const Transition*  FindTransition(const String& from, const String& ev) const;
 	
-	    void DoTransition(const Transition& t,
+	    bool DoTransition(const Transition& t,
 	                      bool record = true,
 	                      Function<void(bool)> on_done = {});
 	
@@ -147,6 +193,7 @@ namespace Upp {
 	    bool   started = false;
 	    bool   transitioning = false;
 	    bool   logging = false;
+	    StateMachineError last_error = StateMachineError::None;
 	};
 
 } // namespace Upp

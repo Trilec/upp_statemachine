@@ -39,9 +39,13 @@ ALL TESTS PASSED
 ## Coverage notes
 
 - `tests/StateMachineCoreTest` covers startup, transitions, history, callback ordering, async completion, and stress cases.
+- The console suite also covers the lightweight error API and `GoBack()` return values.
+- The console suite also covers `Reset()` and `Clear()` lifecycle control.
+- The console suite also covers read-only query helpers and count reporting.
 - Async completion callbacks are tested as single-shot.
 - `Start()` is tested as a transition phase for initial entry.
 - `TryTransition()` is tested with the current-state check.
 - `OnAfter` is tested against the exact transition object.
 - Logging is expected to stay quiet by default in the console suite.
 - Event queueing and transition cancellation remain unimplemented and should not be tested as existing behavior.
+- Boolean-returning API calls should be read as "accepted/began" unless the docs say otherwise.

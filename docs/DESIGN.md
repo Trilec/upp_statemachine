@@ -55,7 +55,12 @@ state without exposing the caller to the internal transition machinery.
 - `AddTransition()` rejects empty fields, missing endpoint states, duplicate `from` + `event` pairs, and late additions after start.
 - `Start()` returns `bool`.
 - `TriggerEvent()` returns `bool`.
+- `GoBack()` returns `bool`.
+- `Reset()` returns `bool` and keeps configuration.
+- `Clear()` returns `bool` and clears configuration.
+- Query helpers expose read-only counts and existence checks.
 - `TriggerEvent()` validates source and target before it can succeed.
+- `GetLastError()` and `GetLastErrorText()` expose the last public failure.
 - `IsStarted()` means `Start()` has been accepted and the machine owns a current initial state.
 - During async initial `OnEnter`, `IsStarted()` and `IsTransitioning()` are both `true`.
 - If initial `OnEnter` later fails, startup rolls back and `IsStarted()` becomes `false`.
@@ -66,3 +71,4 @@ state without exposing the caller to the internal transition machinery.
 - `OnAfter` runs from the exact transition object passed into `DoTransition()`.
 - Event queueing is not implemented.
 - Transition cancellation is not implemented.
+- In this API, `true` usually means the operation was accepted or began; it does not imply async completion.

@@ -56,7 +56,15 @@ Stores a completed transition for history and `GoBack()`.
 - `Start() -> bool`
 - `TriggerEvent(const String& e) -> bool`
 - `TryTransition(const Transition& t) -> bool`
-- `GoBack()`
+- `GoBack() -> bool`
+- `Reset() -> bool`
+- `Clear() -> bool`
+
+### Errors
+
+- `StateMachineError GetLastError() const`
+- `String GetLastErrorText() const`
+- `void ClearError()`
 
 ### Queries
 
@@ -64,6 +72,10 @@ Stores a completed transition for history and `GoBack()`.
 - `IsStarted() const`
 - `IsTransitioning() const`
 - `CanGoBack() const`
+- `HasState(const String& id) const`
+- `HasTransition(const String& from, const String& event) const`
+- `GetStateCount() const`
+- `GetTransitionCount() const`
 - `GetHistoryCount() const`
 - `GetHistoryFrom(int i) const`
 - `GetHistoryTo(int i) const`
@@ -100,6 +112,9 @@ is ignored or blocked.
 14. The transition is recorded in history.
 15. The transitioning flag is cleared.
 
+When `TriggerEvent()` fails, `GetLastError()` and `GetLastErrorText()` report
+the reason.
+
 ## Callback order
 
 For a successful normal transition, the current tested order is:
@@ -126,6 +141,9 @@ It returns `false` if:
 
 If `TryTransition()` succeeds, `OnAfter` is called from the exact transition
 object passed into `DoTransition()`.
+
+When `TryTransition()` fails, `GetLastError()` and `GetLastErrorText()`
+report the reason.
 
 ## Start()
 
@@ -158,6 +176,9 @@ becomes `false`.
 Machine-owned completion callbacks are single-shot: the first `done(true/false)`
 wins and duplicate completions are ignored.
 
+When startup fails, `GetLastError()` and `GetLastErrorText()` report the
+reason.
+
 If the initial state has no `OnEnter`, startup completes immediately with
 `started == true`, `current == initial`, and `transitioning == false`.
 
@@ -168,6 +189,9 @@ If the initial state has no `OnEnter`, startup completes immediately with
 - `state.id` is empty
 - `state.id` already exists
 - the machine has already been started
+
+When `AddState()` fails, `GetLastError()` and `GetLastErrorText()` report the
+reason.
 
 ## History accessors
 
@@ -180,6 +204,15 @@ The history accessors are read-only helpers for tests and diagnostics.
   if `i` is invalid.
 - `GetHistoryEvent(i)` returns the `event` field for entry `i`, or an empty
   `String` if `i` is invalid.
+
+## Query helpers
+
+These are read-only helpers for tests, diagnostics, and later tooling.
+
+- `HasState(id)` returns whether a state id exists.
+- `HasTransition(from, event)` returns whether that transition key exists.
+- `GetStateCount()` returns the number of configured states.
+- `GetTransitionCount()` returns the number of configured transitions.
 
 ## Logging
 
@@ -202,6 +235,64 @@ when:
 - `transition.to` does not exist
 - a transition with the same `from` and `event` already exists
 - the machine has already been started
+
+When `AddTransition()` fails, `GetLastError()` and `GetLastErrorText()`
+report the reason.
+
+## GoBack()
+
+`GoBack()` returns `true` when a back transition begins and `false` when it is
+rejected.
+
+It returns `false` if:
+
+- the machine has not been started
+- the machine is already transitioning
+- there is no prior history entry to return to
+
+When `GoBack()` fails, `GetLastError()` and `GetLastErrorText()` report the
+reason.
+
+## Reset()
+
+`Reset()` returns `true` when runtime state is cleared and configuration is
+kept, and `false` when the machine is transitioning.
+
+On success, `Reset()` clears:
+
+- `current`
+- `started`
+- `transitioning`
+- history
+- last error
+
+It does not clear:
+
+- `initial`
+- states
+- transitions
+
+## Clear()
+
+`Clear()` returns `true` when the machine is fully cleared and `false` when it
+is transitioning.
+
+On success, `Clear()` clears:
+
+- `current`
+- `initial`
+- `started`
+- `transitioning`
+- states
+- transitions
+- history
+- last error
+
+## Boolean contract
+
+For this API, `true` generally means the operation was accepted or began
+successfully. It does not necessarily mean any asynchronous work has already
+finished.
 
 ## Current limitations
 

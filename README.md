@@ -48,10 +48,16 @@ upp_statemachine/
 - `Start()` treats the initial `OnEnter` as a transition phase.
 - Async completion callbacks are single-shot.
 - `TryTransition()` requires `t.from == current`.
+- `GetLastError()` and `GetLastErrorText()` report the last public failure.
+- `GoBack()` returns `bool`.
+- `Reset()` keeps configuration and clears runtime state.
+- `Clear()` clears configuration and runtime state.
+- Query helpers expose read-only existence checks and counts.
 - History inspection helpers are available for tests and diagnostics.
 - Logging is disabled by default.
 - `OnAfter` uses the exact transition object passed in.
 - Event queueing and transition cancellation are not implemented yet.
+- `true` usually means the operation was accepted or began, not that async work has finished.
 
 ## License
 
