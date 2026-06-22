@@ -9,51 +9,62 @@
   Usage:
     1) Define machine and initial state
        StateMachine fsm;
-       fsm.SetInitial("Idle");
+       if(!fsm.AddState({ "Idle", {}, {} }))
+         return;
+       if(!fsm.AddState({ "Working", enterWorking, exitWorking }))
+         return;
+       if(!fsm.SetInitial("Idle"))
+         return;
 
-    2) Add states
-       // "Idle": no entry/exit behavior
-       fsm.AddState({ "Idle",    nullptr,     nullptr });
-       // "Working": custom entry/exit
-       fsm.AddState({ "Working", enterWorking, exitWorking });
-
-    3) Add transitions
+    2) Add transitions
        // Idle --"start"--> Working
-       fsm.AddTransition({
+       if(!fsm.AddTransition({
          "start",     // event
          "Idle",      // from
          "Working",   // to
          nullptr,     // guard
          nullptr,     // onBefore
          nullptr      // onAfter
-       });
+       }))
+         return;
 
-    4) Start and fire events
-       fsm.Start();
-       fsm.TriggerEvent("start");
+    3) Start and fire events
+       if(!fsm.Start())
+         LOG(fsm.GetLastErrorText());
+       if(!fsm.TriggerEvent("start"))
+         LOG(fsm.GetLastErrorText());
 
   UI Example: switch panels on button click
     // assume TopWindow has two panels: panelA, panelB and a Button btn
     StateMachine uiFsm;
-    uiFsm.SetInitial("A");
-    uiFsm.AddState({ "A",
+    if(!uiFsm.AddState({ "A",
       [&](StateMachine&, Function<void(bool)> done){
         panelA.Show(); panelB.Hide();
         done(true);
       },
       nullptr
-    });
-    uiFsm.AddState({ "B",
+    }))
+      return;
+    if(!uiFsm.AddState({ "B",
       [&](StateMachine&, Function<void(bool)> done){
         panelB.Show(); panelA.Hide();
         done(true);
       },
       nullptr
-    });
-    uiFsm.AddTransition({ "toB", "A", "B", nullptr, nullptr, nullptr });
-    uiFsm.AddTransition({ "toA", "B", "A", nullptr, nullptr, nullptr });
-    uiFsm.Start();
-    btn <<= [&]{ uiFsm.TriggerEvent("toB"); };
+    }))
+      return;
+    if(!uiFsm.SetInitial("A"))
+      return;
+    if(!uiFsm.AddTransition({ "toB", "A", "B", nullptr, nullptr, nullptr }))
+      return;
+    if(!uiFsm.AddTransition({ "toA", "B", "A", nullptr, nullptr, nullptr }))
+      return;
+    if(!uiFsm.Start())
+      LOG(uiFsm.GetLastErrorText());
+    btn <<= [&]{
+      if(!uiFsm.TriggerEvent("toB"))
+        LOG(uiFsm.GetLastErrorText());
+    };
 */
 
  
@@ -82,6 +93,10 @@ static String GetStateMachineErrorText(StateMachineError error) {
     case StateMachineError::NoMatchingTransition: return "No matching transition";
     case StateMachineError::GuardRejected: return "Guard rejected";
     case StateMachineError::WrongSourceState: return "Wrong source state";
+    case StateMachineError::StartEnterFailed: return "Start enter failed";
+    case StateMachineError::ExitFailed: return "Exit failed";
+    case StateMachineError::EnterFailed: return "Enter failed";
+    case StateMachineError::BackTransitionFailed: return "Back transition failed";
     }
     return "Unknown error";
 }
@@ -228,7 +243,7 @@ bool StateMachine::Start() {
         started = false;
         current.Clear();
         transitionHistory.Clear();
-        last_error = StateMachineError::MissingState;
+        last_error = StateMachineError::StartEnterFailed;
     };
 
     if (init->OnEnter)
@@ -279,7 +294,6 @@ bool StateMachine::TriggerEvent(const String& e) {
     if (!DoTransition(*t)) {
         return false;
     }
-    ClearError();
     return true;
 }
 
@@ -296,13 +310,18 @@ bool StateMachine::TryTransition(const Transition& t) {
         return false;
     }
 
-    if (!FindState(current)) {
-        last_error = StateMachineError::MissingState;
+    if (t.event.IsEmpty()) {
+        last_error = StateMachineError::EmptyEvent;
         return false;
     }
 
-    if (t.from != current) {
-        last_error = StateMachineError::WrongSourceState;
+    if (t.from.IsEmpty()) {
+        last_error = StateMachineError::EmptyFromState;
+        return false;
+    }
+
+    if (t.to.IsEmpty()) {
+        last_error = StateMachineError::EmptyToState;
         return false;
     }
 
@@ -316,6 +335,16 @@ bool StateMachine::TryTransition(const Transition& t) {
         return false;
     }
 
+    if (!FindState(current)) {
+        last_error = StateMachineError::MissingState;
+        return false;
+    }
+
+    if (t.from != current) {
+        last_error = StateMachineError::WrongSourceState;
+        return false;
+    }
+
     TransitionContext ctx(*this, t.from, t.to, t.event);
     if (t.Guard && !t.Guard(ctx)) {
         last_error = StateMachineError::GuardRejected;
@@ -325,7 +354,6 @@ bool StateMachine::TryTransition(const Transition& t) {
     if (!DoTransition(t)) {
         return false;
     }
-    ClearError();
     return true;
 }
 
@@ -361,7 +389,7 @@ bool StateMachine::GoBack() {
             ClearError();
         }
         else {
-            last_error = StateMachineError::NoMatchingTransition;
+            last_error = StateMachineError::BackTransitionFailed;
         }
     });
     if (!began)
@@ -449,6 +477,8 @@ bool StateMachine::DoTransition(const Transition& t,
 
     auto enter_finished = std::make_shared<bool>(false);
     auto exit_finished  = std::make_shared<bool>(false);
+    auto enter_started  = std::make_shared<bool>(false);
+    ClearError();
     transitioning = true;
     TransitionContext ctx(*this, t.from, t.to, t.event);
 
@@ -459,7 +489,7 @@ bool StateMachine::DoTransition(const Transition& t,
         t.OnBefore(ctx);
 
     // Chain exit → enter → after → finalize
-    auto on_enter_done = [this, ctx, record, on_done, t, enter_finished](bool success) {
+    auto on_enter_done = [this, ctx, record, on_done, t, enter_finished, enter_started](bool success) {
         if (*enter_finished)
             return;
         *enter_finished = true;
@@ -475,19 +505,25 @@ bool StateMachine::DoTransition(const Transition& t,
             ClearError();
         }
         else {
-            last_error = StateMachineError::MissingState;
+            if (!record)
+                last_error = StateMachineError::BackTransitionFailed;
+            else if (*enter_started)
+                last_error = StateMachineError::EnterFailed;
+            else
+                last_error = StateMachineError::ExitFailed;
         }
         transitioning = false;
         if (on_done) on_done(success);
     };
 
-    auto on_exit_done = [this, toState, ctx, on_enter_done, exit_finished](bool success) {
+    auto on_exit_done = [this, toState, ctx, on_enter_done, exit_finished, enter_started, record](bool success) {
         if (*exit_finished)
             return;
         *exit_finished = true;
 
         if (success) {
             if (toState && toState->OnEnter) {
+                *enter_started = true;
                 toState->OnEnter(*this, [this, ctx, on_enter_done](bool enter_success) {
                     if (enter_success)
                         current = ctx.toState;
@@ -499,6 +535,7 @@ bool StateMachine::DoTransition(const Transition& t,
                 });
             }
             else {
+                *enter_started = true;
                 current = ctx.toState;
                 if (logging)
                     LOG("Transition succeeded: now in state " + current);
@@ -509,7 +546,7 @@ bool StateMachine::DoTransition(const Transition& t,
             if (logging)
                 LOG("Error: OnExit failed, transition aborted.");
             transitioning = false;
-            last_error = StateMachineError::MissingState;
+            last_error = record ? StateMachineError::ExitFailed : StateMachineError::BackTransitionFailed;
             on_enter_done(false);
         }
     };

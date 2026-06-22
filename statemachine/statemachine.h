@@ -12,12 +12,18 @@
 //
 // Example:
 //     StateMachine sm;
-//     sm.SetInitial("Idle");
-//     sm.AddState({ "Idle",       nullptr,          nullptr });
-//     sm.AddState({ "Working",    enterWorking,     exitWorking });
-//     sm.AddTransition({ "start", "Idle", "Working" });
-//     sm.Start();
-//     sm.TriggerEvent("start");
+//     if(!sm.AddState({ "Idle", {}, {} }))
+//         return;
+//     if(!sm.AddState({ "Working", enterWorking, exitWorking }))
+//         return;
+//     if(!sm.SetInitial("Idle"))
+//         return;
+//     if(!sm.AddTransition({ "start", "Idle", "Working" }))
+//         return;
+//     if(!sm.Start())
+//         LOG(sm.GetLastErrorText());
+//     if(!sm.TriggerEvent("start"))
+//         LOG(sm.GetLastErrorText());
 
 #pragma once
 
@@ -42,6 +48,10 @@ namespace Upp {
 		NoMatchingTransition,
 		GuardRejected,
 		WrongSourceState,
+		StartEnterFailed,
+		ExitFailed,
+		EnterFailed,
+		BackTransitionFailed,
 	};
 
 	// Forward declaration
@@ -88,7 +98,25 @@ namespace Upp {
 	class StateMachine {
 	public:
 	    /// Set the initial state by its ID
-	    void SetInitial(const String& id)        { initial = id; }
+	    bool SetInitial(const String& id) {
+	        if (id.IsEmpty()) {
+	            last_error = StateMachineError::EmptyStateId;
+	            return false;
+	        }
+	        if (started) {
+	            last_error = StateMachineError::AlreadyStarted;
+	            return false;
+	        }
+	        initial = id;
+	        ClearError();
+	        return true;
+	    }
+
+	    /// Get the configured initial state ID
+	    String GetInitial() const                { return initial; }
+
+	    /// True if an initial state has been configured
+	    bool HasInitial() const                  { return !initial.IsEmpty(); }
 	
 	    /// Add a state definition. Returns false for invalid or late additions.
 	    bool AddState(State s);

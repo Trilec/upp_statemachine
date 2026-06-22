@@ -30,9 +30,9 @@ Start valid initial state: PASSED
 Start empty initial state rejected: PASSED
 
 == Summary ==
-Passed: 42
+Passed: N
 Failed: 0
-Total: 42
+Total: N
 ALL TESTS PASSED
 ```
 

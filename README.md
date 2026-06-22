@@ -59,6 +59,46 @@ upp_statemachine/
 - Event queueing and transition cancellation are not implemented yet.
 - `true` usually means the operation was accepted or began, not that async work has finished.
 
+## Minimal Example
+
+```cpp
+StateMachine sm;
+
+if(!sm.AddState({"Idle", {}, {}}))
+    return;
+
+if(!sm.SetInitial("Idle"))
+    return;
+
+if(!sm.Start())
+    LOG(sm.GetLastErrorText());
+```
+
+## Async Example
+
+```cpp
+StateMachine sm;
+
+if(!sm.AddState({"Idle", {}, {}}))
+    return;
+if(!sm.AddState({"Working",
+    [&](StateMachine&, Function<void(bool)> done) {
+        // show work, then finish later
+        done(true);
+    },
+    {}
+}))
+    return;
+if(!sm.AddTransition({"start", "Idle", "Working"}))
+    return;
+if(!sm.SetInitial("Idle"))
+    return;
+if(!sm.Start())
+    LOG(sm.GetLastErrorText());
+if(!sm.TriggerEvent("start"))
+    LOG(sm.GetLastErrorText());
+```
+
 ## License
 
 Apache License 2.0

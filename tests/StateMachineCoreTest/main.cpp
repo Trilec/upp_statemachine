@@ -160,6 +160,43 @@ CONSOLE_APP_MAIN
             ctx.Check(!sm.AddTransition({"go2", "A", "B"}), "AddTransition() should return false after Start()");
         });
 
+        add("SetInitial valid id accepted", [](TestContext& ctx) {
+            StateMachine sm;
+            ctx.Check(sm.SetInitial("A"), "SetInitial() should return true");
+        });
+
+        add("SetInitial empty id rejected", [](TestContext& ctx) {
+            StateMachine sm;
+            ctx.Check(!sm.SetInitial(""), "SetInitial() should return false");
+            ctx.Check(sm.GetLastError() == StateMachineError::EmptyStateId, "Last error should be EmptyStateId");
+        });
+
+        add("SetInitial after Start rejected", [](TestContext& ctx) {
+            StateMachine sm;
+            ctx.Check(sm.AddState({"A", {}, {}}), "State A should be added");
+            ctx.Check(sm.SetInitial("A"), "SetInitial() should return true");
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(!sm.SetInitial("B"), "SetInitial() should return false after Start()");
+            ctx.Check(sm.GetLastError() == StateMachineError::AlreadyStarted, "Last error should be AlreadyStarted");
+        });
+
+        add("GetInitial returns configured id", [](TestContext& ctx) {
+            StateMachine sm;
+            ctx.Check(sm.SetInitial("A"), "SetInitial() should return true");
+            ctx.Check(sm.GetInitial() == "A", "GetInitial() should return A");
+        });
+
+        add("HasInitial false before SetInitial", [](TestContext& ctx) {
+            StateMachine sm;
+            ctx.Check(!sm.HasInitial(), "HasInitial() should return false");
+        });
+
+        add("HasInitial true after SetInitial", [](TestContext& ctx) {
+            StateMachine sm;
+            ctx.Check(sm.SetInitial("A"), "SetInitial() should return true");
+            ctx.Check(sm.HasInitial(), "HasInitial() should return true");
+        });
+
         add("HasState finds existing state", [](TestContext& ctx) {
             StateMachine sm;
             ctx.Check(sm.AddState({"A", {}, {}}), "State A should be added");
@@ -226,6 +263,21 @@ CONSOLE_APP_MAIN
             ctx.Check(sm.GetLastError() == StateMachineError::MissingState, "Last error should be MissingState");
         });
 
+        add("Start OnEnter failure sets StartEnterFailed", [](TestContext& ctx) {
+            Function<void(bool)> finish_start;
+
+            StateMachine sm;
+            sm.SetInitial("A");
+            ctx.Check(sm.AddState({"A", [&](StateMachine&, Function<void(bool)> done) {
+                finish_start = pick(done);
+            }, {}}), "State A should be added");
+
+            ctx.Check(sm.Start(), "Start() should return true");
+            finish_start(false);
+            ctx.Check(sm.GetLastError() == StateMachineError::StartEnterFailed, "Last error should be StartEnterFailed");
+            ctx.Check(sm.GetLastErrorText() == "Start enter failed", "Last error text should describe the start failure");
+        });
+
         add("TriggerEvent unknown event sets NoMatchingTransition", [](TestContext& ctx) {
             StateMachine sm;
             sm.SetInitial("A");
@@ -251,7 +303,116 @@ CONSOLE_APP_MAIN
             ctx.Check(sm.GetLastError() == StateMachineError::GuardRejected, "Last error should be GuardRejected");
         });
 
+        add("Transition OnExit failure sets ExitFailed", [](TestContext& ctx) {
+            StateMachine sm;
+            sm.SetInitial("A");
+            ctx.Check(sm.AddState({"A", [](auto&, auto done) { done(true); }, [](auto&, auto done) { done(false); } }), "State A should be added");
+            ctx.Check(sm.AddState({"B", [](auto&, auto done) { done(true); }, {}}), "State B should be added");
+            ctx.Check(sm.AddTransition({"go", "A", "B"}), "Transition should be added");
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "TriggerEvent() should begin");
+            ctx.Check(sm.GetLastError() == StateMachineError::ExitFailed, "Last error should be ExitFailed");
+        });
+
+        add("Transition OnEnter failure sets EnterFailed", [](TestContext& ctx) {
+            StateMachine sm;
+            sm.SetInitial("A");
+            ctx.Check(sm.AddState({"A", [](auto&, auto done) { done(true); }, {}}), "State A should be added");
+            ctx.Check(sm.AddState({"B", [](auto&, auto done) { done(false); }, {}}), "State B should be added");
+            ctx.Check(sm.AddTransition({"go", "A", "B"}), "Transition should be added");
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "TriggerEvent() should begin");
+            ctx.Check(sm.GetLastError() == StateMachineError::EnterFailed, "Last error should be EnterFailed");
+        });
+
         add("TryTransition wrong source sets WrongSourceState", [](TestContext& ctx) {
+            StateMachine sm;
+            sm.SetInitial("A");
+            ctx.Check(sm.AddState({"A", {}, {}}), "State A should be added");
+            ctx.Check(sm.AddState({"B", {}, {}}), "State B should be added");
+            ctx.Check(sm.Start(), "Start() should return true");
+
+            Transition t;
+            t.event = "go";
+            t.from = "B";
+            t.to = "A";
+            ctx.Check(!sm.TryTransition(t), "TryTransition() should return false");
+            ctx.Check(sm.GetLastError() == StateMachineError::WrongSourceState, "Last error should be WrongSourceState");
+        });
+
+        add("TryTransition empty event rejected", [](TestContext& ctx) {
+            StateMachine sm;
+            sm.SetInitial("A");
+            ctx.Check(sm.AddState({"A", {}, {}}), "State A should be added");
+            ctx.Check(sm.AddState({"B", {}, {}}), "State B should be added");
+            ctx.Check(sm.Start(), "Start() should return true");
+
+            Transition t;
+            t.from = "A";
+            t.to = "B";
+            ctx.Check(!sm.TryTransition(t), "TryTransition() should return false");
+            ctx.Check(sm.GetLastError() == StateMachineError::EmptyEvent, "Last error should be EmptyEvent");
+        });
+
+        add("TryTransition empty from rejected", [](TestContext& ctx) {
+            StateMachine sm;
+            sm.SetInitial("A");
+            ctx.Check(sm.AddState({"A", {}, {}}), "State A should be added");
+            ctx.Check(sm.AddState({"B", {}, {}}), "State B should be added");
+            ctx.Check(sm.Start(), "Start() should return true");
+
+            Transition t;
+            t.event = "go";
+            t.to = "B";
+            ctx.Check(!sm.TryTransition(t), "TryTransition() should return false");
+            ctx.Check(sm.GetLastError() == StateMachineError::EmptyFromState, "Last error should be EmptyFromState");
+        });
+
+        add("TryTransition empty to rejected", [](TestContext& ctx) {
+            StateMachine sm;
+            sm.SetInitial("A");
+            ctx.Check(sm.AddState({"A", {}, {}}), "State A should be added");
+            ctx.Check(sm.AddState({"B", {}, {}}), "State B should be added");
+            ctx.Check(sm.Start(), "Start() should return true");
+
+            Transition t;
+            t.event = "go";
+            t.from = "A";
+            ctx.Check(!sm.TryTransition(t), "TryTransition() should return false");
+            ctx.Check(sm.GetLastError() == StateMachineError::EmptyToState, "Last error should be EmptyToState");
+        });
+
+        add("TryTransition missing from rejected", [](TestContext& ctx) {
+            StateMachine sm;
+            sm.SetInitial("A");
+            ctx.Check(sm.AddState({"A", {}, {}}), "State A should be added");
+            ctx.Check(sm.AddState({"B", {}, {}}), "State B should be added");
+            ctx.Check(sm.Start(), "Start() should return true");
+
+            Transition t;
+            t.event = "go";
+            t.from = "Missing";
+            t.to = "B";
+            ctx.Check(!sm.TryTransition(t), "TryTransition() should return false");
+            ctx.Check(sm.GetLastError() == StateMachineError::MissingFromState, "Last error should be MissingFromState");
+        });
+
+        add("TryTransition missing to rejected", [](TestContext& ctx) {
+            StateMachine sm;
+            sm.SetInitial("A");
+            ctx.Check(sm.AddState({"A", {}, {}}), "State A should be added");
+            ctx.Check(sm.AddState({"B", {}, {}}), "State B should be added");
+            ctx.Check(sm.Start(), "Start() should return true");
+
+            Transition t;
+            t.event = "go";
+            t.from = "A";
+            t.to = "Missing";
+            ctx.Check(!sm.TryTransition(t), "TryTransition() should return false");
+            ctx.Check(sm.GetLastError() == StateMachineError::MissingToState, "Last error should be MissingToState");
+        });
+
+        add("TryTransition wrong current source rejected", [](TestContext& ctx) {
             StateMachine sm;
             sm.SetInitial("A");
             ctx.Check(sm.AddState({"A", {}, {}}), "State A should be added");
@@ -274,6 +435,41 @@ CONSOLE_APP_MAIN
             ctx.Check(sm.GetLastError() == StateMachineError::DuplicateStateId, "Last error should be DuplicateStateId before success");
             ctx.Check(sm.AddTransition({"go", "A", "B"}), "AddTransition() should succeed");
             ctx.Check(sm.GetLastError() == StateMachineError::None, "Successful AddTransition() should clear the last error");
+        });
+
+        add("GoBack OnExit failure sets BackTransitionFailed", [](TestContext& ctx) {
+            StateMachine sm;
+            sm.SetInitial("A");
+            ctx.Check(sm.AddState({"A", [](auto&, auto done) { done(true); }, {}}), "State A should be added");
+            ctx.Check(sm.AddState({"B", [](auto&, auto done) { done(true); }, {}}), "State B should be added");
+            ctx.Check(sm.AddState({"C", [](auto&, auto done) { done(true); }, [](auto&, auto done) { done(false); } }), "State C should be added");
+            ctx.Check(sm.AddTransition({"to_b", "A", "B"}), "Transition A->B should be added");
+            ctx.Check(sm.AddTransition({"to_c", "B", "C"}), "Transition B->C should be added");
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("to_b"), "A->B should begin");
+            ctx.Check(sm.TriggerEvent("to_c"), "B->C should begin");
+            ctx.Check(sm.GoBack(), "GoBack() should return true");
+            ctx.Check(sm.GetLastError() == StateMachineError::BackTransitionFailed, "Last error should be BackTransitionFailed");
+        });
+
+        add("GoBack OnEnter failure sets BackTransitionFailed", [](TestContext& ctx) {
+            bool allow_b_enter = true;
+
+            StateMachine sm;
+            sm.SetInitial("A");
+            ctx.Check(sm.AddState({"A", [](auto&, auto done) { done(true); }, {}}), "State A should be added");
+            ctx.Check(sm.AddState({"B", [&](StateMachine&, Function<void(bool)> done) {
+                done(allow_b_enter);
+            }, {}}), "State B should be added");
+            ctx.Check(sm.AddState({"C", [](auto&, auto done) { done(true); }, {}}), "State C should be added");
+            ctx.Check(sm.AddTransition({"to_b", "A", "B"}), "Transition A->B should be added");
+            ctx.Check(sm.AddTransition({"to_c", "B", "C"}), "Transition B->C should be added");
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("to_b"), "A->B should begin");
+            ctx.Check(sm.TriggerEvent("to_c"), "B->C should begin");
+            allow_b_enter = false;
+            ctx.Check(sm.GoBack(), "GoBack() should return true");
+            ctx.Check(sm.GetLastError() == StateMachineError::BackTransitionFailed, "Last error should be BackTransitionFailed");
         });
     });
 
@@ -407,6 +603,122 @@ CONSOLE_APP_MAIN
             ctx.Check(sm.GetCurrent() == "A", "Clear() rejection should not clear current");
             finish_start(true);
             ctx.Check(sm.IsStarted(), "Machine should still be started after async completion");
+        });
+    });
+
+    RunGroup("Consistency", passed, failed, [&](auto add) {
+        add("Reset after failed transition leaves config reusable", [](TestContext& ctx) {
+            StateMachine sm;
+            sm.SetInitial("A");
+            ctx.Check(sm.AddState({"A", [](auto&, auto done) { done(true); }, [](auto&, auto done) { done(false); } }), "State A should be added");
+            ctx.Check(sm.AddState({"B", {}, {}}), "State B should be added");
+            ctx.Check(sm.AddTransition({"go", "A", "B"}), "Transition should be added");
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "TriggerEvent() should begin");
+            ctx.Check(sm.GetCurrent() == "A", "Current state should remain A after failed transition");
+            ctx.Check(sm.Reset(), "Reset() should return true after failure");
+            ctx.Check(sm.Start(), "Start() should work again after Reset()");
+            ctx.Check(sm.TriggerEvent("go"), "Transition should work again after Reset()");
+            ctx.Check(sm.GetCurrent() == "B", "Current state should be B after reused configuration");
+        });
+
+        add("Clear after Reset leaves machine empty", [](TestContext& ctx) {
+            StateMachine sm;
+            sm.SetInitial("A");
+            ctx.Check(sm.AddState({"A", {}, {}}), "State A should be added");
+            ctx.Check(sm.AddState({"B", {}, {}}), "State B should be added");
+            ctx.Check(sm.AddTransition({"go", "A", "B"}), "Transition should be added");
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.Reset(), "Reset() should return true");
+            ctx.Check(sm.Clear(), "Clear() should return true after Reset()");
+            ctx.Check(!sm.HasInitial(), "Clear() should remove initial state");
+            ctx.Check(sm.GetStateCount() == 0, "Clear() should remove states");
+            ctx.Check(sm.GetTransitionCount() == 0, "Clear() should remove transitions");
+            ctx.Check(!sm.Start(), "Start() should fail after Clear()");
+        });
+
+        add("Last error clears after successful operation", [](TestContext& ctx) {
+            StateMachine sm;
+            ctx.Check(!sm.SetInitial(""), "SetInitial() should fail for empty id");
+            ctx.Check(sm.GetLastError() == StateMachineError::EmptyStateId, "Last error should be EmptyStateId");
+            ctx.Check(sm.SetInitial("A"), "SetInitial() should succeed");
+            ctx.Check(sm.GetLastError() == StateMachineError::None, "Successful SetInitial() should clear the last error");
+        });
+
+        add("History unchanged after rejected TriggerEvent", [](TestContext& ctx) {
+            StateMachine sm;
+            sm.SetInitial("A");
+            ctx.Check(sm.AddState({"A", {}, {}}), "State A should be added");
+            ctx.Check(sm.AddState({"B", {}, {}}), "State B should be added");
+            ctx.Check(sm.AddTransition({"go", "A", "B"}), "Transition should be added");
+            ctx.Check(sm.Start(), "Start() should return true");
+            const int history_before = sm.GetHistoryCount();
+            ctx.Check(!sm.TriggerEvent("missing"), "TriggerEvent() should return false");
+            ctx.Check(sm.GetHistoryCount() == history_before, "History should be unchanged after rejected TriggerEvent()");
+        });
+
+        add("History unchanged after guard rejection", [](TestContext& ctx) {
+            StateMachine sm;
+            sm.SetInitial("A");
+            ctx.Check(sm.AddState({"A", {}, {}}), "State A should be added");
+            ctx.Check(sm.AddState({"B", {}, {}}), "State B should be added");
+            Transition t;
+            t.event = "go";
+            t.from = "A";
+            t.to = "B";
+            t.Guard = [](const TransitionContext&) { return false; };
+            ctx.Check(sm.AddTransition(t), "Transition should be added");
+            ctx.Check(sm.Start(), "Start() should return true");
+            const int history_before = sm.GetHistoryCount();
+            ctx.Check(!sm.TriggerEvent("go"), "TriggerEvent() should return false");
+            ctx.Check(sm.GetHistoryCount() == history_before, "History should be unchanged after guard rejection");
+        });
+
+        add("History unchanged after failed OnExit", [](TestContext& ctx) {
+            StateMachine sm;
+            sm.SetInitial("A");
+            ctx.Check(sm.AddState({"A", {}, [](auto&, auto done) { done(false); }}), "State A should be added");
+            ctx.Check(sm.AddState({"B", {}, {}}), "State B should be added");
+            ctx.Check(sm.AddTransition({"go", "A", "B"}), "Transition should be added");
+            ctx.Check(sm.Start(), "Start() should return true");
+            const int history_before = sm.GetHistoryCount();
+            ctx.Check(sm.TriggerEvent("go"), "TriggerEvent() should begin");
+            ctx.Check(sm.GetHistoryCount() == history_before, "History should be unchanged after failed OnExit()");
+        });
+
+        add("History unchanged after failed OnEnter", [](TestContext& ctx) {
+            StateMachine sm;
+            sm.SetInitial("A");
+            ctx.Check(sm.AddState({"A", {}, {}}), "State A should be added");
+            ctx.Check(sm.AddState({"B", [](auto&, auto done) { done(false); }, {}}), "State B should be added");
+            ctx.Check(sm.AddTransition({"go", "A", "B"}), "Transition should be added");
+            ctx.Check(sm.Start(), "Start() should return true");
+            const int history_before = sm.GetHistoryCount();
+            ctx.Check(sm.TriggerEvent("go"), "TriggerEvent() should begin");
+            ctx.Check(sm.GetHistoryCount() == history_before, "History should be unchanged after failed OnEnter()");
+        });
+
+        add("Current state unchanged after rejected TryTransition", [](TestContext& ctx) {
+            StateMachine sm;
+            sm.SetInitial("A");
+            ctx.Check(sm.AddState({"A", {}, {}}), "State A should be added");
+            ctx.Check(sm.AddState({"B", {}, {}}), "State B should be added");
+            ctx.Check(sm.Start(), "Start() should return true");
+            Transition t;
+            t.event = "go";
+            t.from = "B";
+            t.to = "A";
+            ctx.Check(!sm.TryTransition(t), "TryTransition() should return false");
+            ctx.Check(sm.GetCurrent() == "A", "Current state should remain A after rejected TryTransition()");
+        });
+
+        add("Current state unchanged after rejected GoBack", [](TestContext& ctx) {
+            StateMachine sm;
+            sm.SetInitial("A");
+            ctx.Check(sm.AddState({"A", {}, {}}), "State A should be added");
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(!sm.GoBack(), "GoBack() should return false with no history");
+            ctx.Check(sm.GetCurrent() == "A", "Current state should remain A after rejected GoBack()");
         });
     });
 

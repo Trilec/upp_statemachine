@@ -1,11 +1,24 @@
 # Roadmap
 
-## Not implemented yet
+## Near-term
 
-- Event queueing
-- Transition cancellation
-- Safer async lifetime guards
-- Richer transition diagnostics
+- Event queue policy
+- Cancellation policy
+- Callback and lifetime safety notes
+- GUI demo cleanup
+
+### Event queue policy
+
+Queueing is not implemented yet. The options are:
+
+- `DropWhileTransitioning`
+- `QueueWhileTransitioning`
+- `RejectWhileTransitioning`
+
+Current behavior is effectively `RejectWhileTransitioning`.
+
+## Later
+
 - Hierarchical states
 - StateViewManager
 - Code generation helpers

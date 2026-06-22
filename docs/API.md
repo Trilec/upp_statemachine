@@ -47,7 +47,7 @@ Stores a completed transition for history and `GoBack()`.
 
 ### Configuration
 
-- `SetInitial(const String& id)`
+- `SetInitial(const String& id) -> bool`
 - `AddState(State s) -> bool`
 - `AddTransition(Transition t) -> bool`
 
@@ -193,6 +193,18 @@ If the initial state has no `OnEnter`, startup completes immediately with
 When `AddState()` fails, `GetLastError()` and `GetLastErrorText()` report the
 reason.
 
+Example:
+
+```cpp
+StateMachine sm;
+if(!sm.AddState({"Idle", {}, {}}))
+    return;
+if(!sm.SetInitial("Idle"))
+    return;
+if(!sm.Start())
+    LOG(sm.GetLastErrorText());
+```
+
 ## History accessors
 
 The history accessors are read-only helpers for tests and diagnostics.
@@ -238,6 +250,18 @@ when:
 
 When `AddTransition()` fails, `GetLastError()` and `GetLastErrorText()`
 report the reason.
+
+Example:
+
+```cpp
+StateMachine sm;
+if(!sm.AddState({"Idle", {}, {}}))
+    return;
+if(!sm.AddState({"Working", {}, {}}))
+    return;
+if(!sm.AddTransition({"start", "Idle", "Working"}))
+    return;
+```
 
 ## GoBack()
 
