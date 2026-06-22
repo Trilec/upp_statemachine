@@ -52,6 +52,16 @@ namespace Upp {
 		ExitFailed,
 		EnterFailed,
 		BackTransitionFailed,
+		EventRejectedWhileTransitioning,
+		EventDroppedWhileTransitioning,
+		EventQueueingNotImplemented,
+	};
+
+	// Stored policy only for now; queueing behavior is deferred.
+	enum class EventPolicy {
+		RejectWhileTransitioning,
+		DropWhileTransitioning,
+		QueueWhileTransitioning,
 	};
 
 	// Forward declaration
@@ -150,6 +160,12 @@ namespace Upp {
 
 	    /// True if internal logging is enabled
 	    bool IsLoggingEnabled() const       { return logging; }
+
+	    /// Set the event policy used while a transition is already in progress
+	    void SetEventPolicy(EventPolicy policy) { event_policy = policy; ClearError(); }
+
+	    /// Get the stored event policy
+	    EventPolicy GetEventPolicy() const { return event_policy; }
 	
 	    /// Get current state ID
 	    String GetCurrent() const                { return current; }
@@ -221,6 +237,7 @@ namespace Upp {
 	    bool   started = false;
 	    bool   transitioning = false;
 	    bool   logging = false;
+	    EventPolicy event_policy = EventPolicy::RejectWhileTransitioning;
 	    StateMachineError last_error = StateMachineError::None;
 	};
 

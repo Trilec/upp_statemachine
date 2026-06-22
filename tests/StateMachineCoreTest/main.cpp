@@ -101,6 +101,65 @@ CONSOLE_APP_MAIN
             ctx.Check(!sm.IsLoggingEnabled(), "Logging flag should be disabled");
         });
 
+        add("Default event policy is RejectWhileTransitioning", [](TestContext& ctx) {
+            StateMachine sm;
+            ctx.Check(sm.GetEventPolicy() == EventPolicy::RejectWhileTransitioning, "Default event policy should be RejectWhileTransitioning");
+        });
+
+        add("SetEventPolicy RejectWhileTransitioning", [](TestContext& ctx) {
+            StateMachine sm;
+            sm.SetEventPolicy(EventPolicy::RejectWhileTransitioning);
+            ctx.Check(sm.GetEventPolicy() == EventPolicy::RejectWhileTransitioning, "Stored event policy should be RejectWhileTransitioning");
+        });
+
+        add("SetEventPolicy DropWhileTransitioning", [](TestContext& ctx) {
+            StateMachine sm;
+            sm.SetEventPolicy(EventPolicy::DropWhileTransitioning);
+            ctx.Check(sm.GetEventPolicy() == EventPolicy::DropWhileTransitioning, "Stored event policy should be DropWhileTransitioning");
+        });
+
+        add("SetEventPolicy QueueWhileTransitioning", [](TestContext& ctx) {
+            StateMachine sm;
+            sm.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
+            ctx.Check(sm.GetEventPolicy() == EventPolicy::QueueWhileTransitioning, "Stored event policy should be QueueWhileTransitioning");
+        });
+
+        add("QueueWhileTransitioning currently rejects until implemented", [](TestContext& ctx) {
+            Function<void(bool)> finish_exit;
+
+            StateMachine sm;
+            sm.SetInitial("A");
+            sm.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
+            ctx.Check(sm.AddState({"A", {}, [&](StateMachine&, Function<void(bool)> done) {
+                finish_exit = pick(done);
+            }}), "State A should be added");
+            ctx.Check(sm.AddState({"B", {}, {}}), "State B should be added");
+            ctx.Check(sm.AddTransition({"go", "A", "B"}), "Transition should be added");
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "TriggerEvent() should begin");
+            ctx.Check(!sm.TriggerEvent("go"), "TriggerEvent() should still reject while transitioning");
+            ctx.Check(sm.GetLastError() == StateMachineError::EventQueueingNotImplemented, "Last error should be EventQueueingNotImplemented");
+            finish_exit(true);
+        });
+
+        add("DropWhileTransitioning drops event during async transition", [](TestContext& ctx) {
+            Function<void(bool)> finish_exit;
+
+            StateMachine sm;
+            sm.SetInitial("A");
+            sm.SetEventPolicy(EventPolicy::DropWhileTransitioning);
+            ctx.Check(sm.AddState({"A", {}, [&](StateMachine&, Function<void(bool)> done) {
+                finish_exit = pick(done);
+            }}), "State A should be added");
+            ctx.Check(sm.AddState({"B", {}, {}}), "State B should be added");
+            ctx.Check(sm.AddTransition({"go", "A", "B"}), "Transition should be added");
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "TriggerEvent() should begin");
+            ctx.Check(!sm.TriggerEvent("go"), "TriggerEvent() should be dropped while transitioning");
+            ctx.Check(sm.GetLastError() == StateMachineError::EventDroppedWhileTransitioning, "Last error should be EventDroppedWhileTransitioning");
+            finish_exit(true);
+        });
+
         add("AddTransition valid transition accepted", [](TestContext& ctx) {
             StateMachine sm;
             ctx.Check(sm.AddState({"A", [](auto&, auto done) { done(true); }, {}}), "State A should be added");
@@ -916,7 +975,7 @@ CONSOLE_APP_MAIN
             ctx.Check(sm.GetCurrent() == "B", "Current state should be B");
         });
 
-        add("TriggerEvent while transitioning rejected", [](TestContext& ctx) {
+        add("RejectWhileTransitioning rejects event during async transition", [](TestContext& ctx) {
             Function<void(bool)> finish_start;
 
             StateMachine sm;
@@ -931,6 +990,7 @@ CONSOLE_APP_MAIN
             ctx.Check(sm.IsTransitioning(), "Machine should be transitioning during initial OnEnter");
             ctx.Check(!sm.TriggerEvent("go"), "TriggerEvent() should return false while transitioning");
             ctx.Check(sm.GetCurrent() == "A", "Current state should stay A while transitioning");
+            ctx.Check(sm.GetLastError() == StateMachineError::EventRejectedWhileTransitioning, "Last error should be EventRejectedWhileTransitioning");
 
             finish_start(true);
             ctx.Check(!sm.IsTransitioning(), "Machine should stop transitioning after initial OnEnter completes");
@@ -1929,6 +1989,7 @@ CONSOLE_APP_MAIN
             ctx.Check(sm.IsTransitioning(), "Machine should be transitioning while OnExit is pending");
             ctx.Check(!sm.TriggerEvent("other"), "Event during async OnExit should be rejected");
             ctx.Check(sm.GetCurrent() == "A", "Current state should stay A during async OnExit");
+            ctx.Check(sm.GetLastError() == StateMachineError::EventRejectedWhileTransitioning, "Last error should be EventRejectedWhileTransitioning");
 
             finish_exit(true);
             ctx.Check(!sm.IsTransitioning(), "Machine should stop transitioning after OnExit completes");
@@ -1953,6 +2014,7 @@ CONSOLE_APP_MAIN
             ctx.Check(sm.IsTransitioning(), "Machine should be transitioning while OnEnter is pending");
             ctx.Check(!sm.TriggerEvent("other"), "Event during async OnEnter should be rejected");
             ctx.Check(sm.GetCurrent() == "A", "Current state should stay A during async OnEnter");
+            ctx.Check(sm.GetLastError() == StateMachineError::EventRejectedWhileTransitioning, "Last error should be EventRejectedWhileTransitioning");
 
             finish_enter(true);
             ctx.Check(!sm.IsTransitioning(), "Machine should stop transitioning after OnEnter completes");

@@ -69,6 +69,16 @@ state without exposing the caller to the internal transition machinery.
 - Logging is opt-in; normal transition flow is quiet unless enabled.
 - `TryTransition()` requires `t.from == current`.
 - `OnAfter` runs from the exact transition object passed into `DoTransition()`.
+- `EventPolicy` is stored on the machine, but queueing is not implemented yet.
+- Current implemented behavior:
+  - `RejectWhileTransitioning`
+  - `DropWhileTransitioning`
+- Declared but not fully implemented:
+  - `QueueWhileTransitioning`
+- `TriggerEvent()` while transitioning reports:
+  - `EventRejectedWhileTransitioning`
+  - `EventDroppedWhileTransitioning`
+  - `EventQueueingNotImplemented`
 - Event queueing is not implemented.
 - Transition cancellation is not implemented.
 - In this API, `true` usually means the operation was accepted or began; it does not imply async completion.

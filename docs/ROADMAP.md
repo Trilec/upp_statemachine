@@ -7,6 +7,12 @@
 - Callback and lifetime safety notes
 - GUI demo cleanup
 
+## Current behavior
+
+- `RejectWhileTransitioning` is implemented.
+- `DropWhileTransitioning` is implemented.
+- `QueueWhileTransitioning` is declared but not fully implemented yet.
+
 ### Event queue policy
 
 Queueing is not implemented yet. The options are:
@@ -15,7 +21,12 @@ Queueing is not implemented yet. The options are:
 - `QueueWhileTransitioning`
 - `RejectWhileTransitioning`
 
-Current behavior is effectively `RejectWhileTransitioning`.
+Current behavior is:
+
+- `RejectWhileTransitioning`
+- `DropWhileTransitioning`
+
+`QueueWhileTransitioning` is declared but not fully implemented yet.
 
 ## Later
 

@@ -7,6 +7,7 @@
 - Reorganized repository into separate library, examples, tests, and docs areas.
 - Moved reusable U++ package into `statemachine/`.
 - Moved GUI test harness into `examples/StateMachineGuiTest/`.
+- Documented event policy as reject/drop implemented, queue declared but not yet implemented.
 - Hardened `Start()`, `TriggerEvent()`, and `TryTransition()` return values and state checks.
 - Added lightweight error reporting via `GetLastError()` and `GetLastErrorText()`.
 - Made `GoBack()` return `bool`.

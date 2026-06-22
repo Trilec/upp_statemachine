@@ -43,6 +43,14 @@ Stores a completed transition for history and `GoBack()`.
 - `String to`
 - `String event`
 
+### `EventPolicy`
+
+Controls how events are treated while a transition is already in progress.
+
+- `RejectWhileTransitioning`
+- `DropWhileTransitioning`
+- `QueueWhileTransitioning`
+
 ## `StateMachine`
 
 ### Configuration
@@ -50,6 +58,8 @@ Stores a completed transition for history and `GoBack()`.
 - `SetInitial(const String& id) -> bool`
 - `AddState(State s) -> bool`
 - `AddTransition(Transition t) -> bool`
+- `SetEventPolicy(EventPolicy policy)`
+- `GetEventPolicy() const`
 
 ### Execution
 
@@ -65,6 +75,12 @@ Stores a completed transition for history and `GoBack()`.
 - `StateMachineError GetLastError() const`
 - `String GetLastErrorText() const`
 - `void ClearError()`
+
+Relevant transition-time event errors:
+
+- `EventRejectedWhileTransitioning`
+- `EventDroppedWhileTransitioning`
+- `EventQueueingNotImplemented`
 
 ### Queries
 
@@ -111,6 +127,22 @@ is ignored or blocked.
 13. The transition `OnAfter` callback is called.
 14. The transition is recorded in history.
 15. The transitioning flag is cleared.
+
+Current implemented behavior:
+
+- `RejectWhileTransitioning`
+- `DropWhileTransitioning`
+
+Declared but not fully implemented:
+
+- `QueueWhileTransitioning`
+
+If `TriggerEvent()` is called while a transition is in progress, the stored
+policy determines the error:
+
+- `RejectWhileTransitioning` -> `EventRejectedWhileTransitioning`
+- `DropWhileTransitioning` -> `EventDroppedWhileTransitioning`
+- `QueueWhileTransitioning` -> `EventQueueingNotImplemented`
 
 When `TriggerEvent()` fails, `GetLastError()` and `GetLastErrorText()` report
 the reason.

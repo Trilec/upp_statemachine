@@ -97,6 +97,9 @@ static String GetStateMachineErrorText(StateMachineError error) {
     case StateMachineError::ExitFailed: return "Exit failed";
     case StateMachineError::EnterFailed: return "Enter failed";
     case StateMachineError::BackTransitionFailed: return "Back transition failed";
+    case StateMachineError::EventRejectedWhileTransitioning: return "Event rejected while transitioning";
+    case StateMachineError::EventDroppedWhileTransitioning: return "Event dropped while transitioning";
+    case StateMachineError::EventQueueingNotImplemented: return "Event queueing not implemented";
     }
     return "Unknown error";
 }
@@ -264,7 +267,17 @@ bool StateMachine::TriggerEvent(const String& e) {
         return false;
     }
     if (transitioning) {
-        last_error = StateMachineError::TransitionInProgress;
+        switch (event_policy) {
+        case EventPolicy::RejectWhileTransitioning:
+            last_error = StateMachineError::EventRejectedWhileTransitioning;
+            break;
+        case EventPolicy::DropWhileTransitioning:
+            last_error = StateMachineError::EventDroppedWhileTransitioning;
+            break;
+        case EventPolicy::QueueWhileTransitioning:
+            last_error = StateMachineError::EventQueueingNotImplemented;
+            break;
+        }
         return false;
     }
 
