@@ -56,6 +56,8 @@ Controls how events are treated while a transition is already in progress.
 ### Configuration
 
 - `SetInitial(const String& id) -> bool`
+- `GetInitial() const`
+- `HasInitial() const`
 - `AddState(State s) -> bool`
 - `AddTransition(Transition t) -> bool`
 - `SetEventPolicy(EventPolicy policy)`
@@ -96,8 +98,8 @@ Relevant transition-time event errors:
 - `GetHistoryFrom(int i) const`
 - `GetHistoryTo(int i) const`
 - `GetHistoryEvent(int i) const`
-- `EnableLogging(bool b = true)`
 - `IsLoggingEnabled() const`
+- `EnableLogging(bool b = true)`
 
 ### Hooks
 
