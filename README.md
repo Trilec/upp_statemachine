@@ -22,7 +22,8 @@ upp_statemachine/
 │   ├── DESIGN.md
 │   ├── API.md
 │   ├── TESTING.md
-│   └── ROADMAP.md
+│   ├── ROADMAP.md
+│   └── RELEASE_CHECKLIST.md
 ├── README.md
 ├── CHANGELOG.md
 └── LICENSE
