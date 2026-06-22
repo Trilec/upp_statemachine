@@ -84,6 +84,11 @@ Relevant transition-time event errors:
 - `EventDroppedWhileTransitioning`
 - `EventQueueingNotImplemented`
 
+### Logging
+
+- `EnableLogging(bool b = true)`
+- `IsLoggingEnabled() const`
+
 ### Queries
 
 - `GetCurrent() const`
@@ -98,8 +103,6 @@ Relevant transition-time event errors:
 - `GetHistoryFrom(int i) const`
 - `GetHistoryTo(int i) const`
 - `GetHistoryEvent(int i) const`
-- `IsLoggingEnabled() const`
-- `EnableLogging(bool b = true)`
 
 ### Hooks
 
