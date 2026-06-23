@@ -3471,6 +3471,28 @@ CONSOLE_APP_MAIN
             ctx.Check(sm.GetCurrent() == "B", "Cleared queued events should not later run");
         });
 
+        add("ClearQueuedEvents is allowed during active transition", [](TestContext& ctx) {
+            Function<void(bool)> finish_exit;
+            StateMachine sm;
+            sm.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto done) { done(true); }, [&](StateMachine&, Function<void(bool)> done) { finish_exit = pick(done); }});
+            sm.AddState({"B", [](auto&, auto done) { done(true); }, {}});
+            sm.AddState({"C", [](auto&, auto done) { done(true); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+            sm.AddTransition({"next", "B", "C"});
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "A->B should begin");
+            ctx.Check(sm.TriggerEvent("next"), "next should queue");
+            ctx.Check(sm.GetQueuedEventCount() == 1, "Queue should contain one pending event");
+            sm.ClearQueuedEvents();
+            ctx.Check(sm.IsTransitioning(), "ClearQueuedEvents() should not cancel the active transition");
+            ctx.Check(sm.GetQueuedEventCount() == 0, "ClearQueuedEvents() should clear pending queued events immediately");
+            finish_exit(true);
+            ctx.Check(sm.GetCurrent() == "B", "Active transition should still complete normally");
+            ctx.Check(sm.GetHistoryCount() == 2, "Active transition should still commit its history");
+        });
+
         add("Queue full returns false and sets EventQueueFull", [](TestContext& ctx) {
             Function<void(bool)> finish_exit;
             StateMachine sm;
@@ -3662,6 +3684,40 @@ CONSOLE_APP_MAIN
             ctx.Check(sm.GetQueuedEventCount() == 1, "Queue should trim to the new limit");
             finish_exit(true);
             ctx.Check(sm.GetCurrent() == "C", "Newest queued event should be trimmed from the back");
+        });
+
+        add("Queued event during active GoBack drains after history pop", [](TestContext& ctx) {
+            Function<void(bool)> finish_exit_c;
+            Vector<String> order;
+            StateMachine sm;
+            sm.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto done) { done(true); }, {}});
+            sm.AddState({"B", [](auto&, auto done) { done(true); }, {}});
+            sm.AddState({"C", [](auto&, auto done) { done(true); }, [&](StateMachine&, Function<void(bool)> done) { finish_exit_c = pick(done); }});
+            sm.AddTransition({"to_b", "A", "B"});
+            sm.AddTransition({"to_c", "B", "C"});
+            Transition to_c_again{"to_c_again", "B", "C"};
+            to_c_again.OnBefore = [&](const TransitionContext&) {
+                order.Add(Format("queued history=%d current=%s", sm.GetHistoryCount(), sm.GetCurrent()));
+            };
+            sm.AddTransition(to_c_again);
+
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("to_b"), "A->B should begin");
+            ctx.Check(sm.TriggerEvent("to_c"), "B->C should begin");
+            ctx.Check(sm.GetCurrent() == "C", "Current state should be C before GoBack()");
+            ctx.Check(sm.GetHistoryCount() == 3, "History should contain start plus two transitions before GoBack()");
+            ctx.Check(sm.GoBack(), "GoBack() should begin");
+            ctx.Check(sm.TriggerEvent("to_c_again"), "Queued event should be accepted during active GoBack()");
+            ctx.Check(sm.GetQueuedEventCount() == 1, "Queued event should be pending during GoBack()");
+            finish_exit_c(true);
+            ctx.Check(order.GetCount() == 1, "Queued event should run once after GoBack()");
+            ctx.Check(order[0] == "queued history=2 current=B", "Queued event should observe GoBack history already popped before draining");
+            ctx.Check(sm.GetCurrent() == "C", "Queued event should run after GoBack and return to C");
+            ctx.Check(sm.GetHistoryCount() == 3, "History should reflect popped GoBack state and then the drained queued event");
+            ctx.Check(sm.GetHistoryTo(1) == "B", "History should be popped back to B before the drained event");
+            ctx.Check(sm.GetHistoryTo(2) == "C", "Queued event should append the new C transition after GoBack cleanup");
         });
     });
 
@@ -4138,6 +4194,52 @@ CONSOLE_APP_MAIN
             ctx.Check(sm.GetHistoryCount() == 1, "Duplicate startup completion should not add history");
             ctx.Check(sm.GetCurrent() == "A", "Duplicate startup completion should not change current");
             ctx.Check(sm.GetLastError() == StateMachineError::None, "Duplicate startup completion should not change the final error");
+        });
+
+        add("Queued event during async startup drains after successful startup", [](TestContext& ctx) {
+            Function<void(bool)> finish_start;
+            StateMachine sm;
+            sm.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
+            sm.SetInitial("A");
+            sm.AddState({"A", [&](StateMachine&, Function<void(bool)> done) {
+                finish_start = pick(done);
+            }, {}});
+            sm.AddState({"B", [](auto&, auto done) { done(true); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.IsTransitioning(), "Startup should be pending");
+            ctx.Check(sm.TriggerEvent("go"), "TriggerEvent() should queue during async startup");
+            ctx.Check(sm.GetQueuedEventCount() == 1, "Startup queue should contain one event");
+            finish_start(true);
+            ctx.Check(sm.GetCurrent() == "B", "Queued event should drain after successful startup");
+            ctx.Check(sm.GetHistoryCount() == 2, "History should contain startup and drained queued event");
+            ctx.Check(sm.GetHistoryEvent(0) == "__start", "First history record should still be startup");
+            ctx.Check(sm.GetHistoryEvent(1) == "go", "Second history record should be the drained queued event");
+            ctx.Check(sm.GetQueuedEventCount() == 0, "Queue should be empty after startup drain");
+        });
+
+        add("Queued event during failed async startup does not drain", [](TestContext& ctx) {
+            Function<void(bool)> finish_start;
+            StateMachine sm;
+            sm.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
+            sm.SetInitial("A");
+            sm.AddState({"A", [&](StateMachine&, Function<void(bool)> done) {
+                finish_start = pick(done);
+            }, {}});
+            sm.AddState({"B", [](auto&, auto done) { done(true); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "TriggerEvent() should queue during failed async startup");
+            ctx.Check(sm.GetQueuedEventCount() == 1, "Startup queue should contain one event before failure");
+            finish_start(false);
+            ctx.Check(!sm.IsStarted(), "Failed startup should roll back started");
+            ctx.Check(!sm.IsTransitioning(), "Failed startup should clear transitioning");
+            ctx.Check(sm.GetCurrent().IsEmpty(), "Failed startup should clear current");
+            ctx.Check(sm.GetHistoryCount() == 0, "Failed startup should leave no history");
+            ctx.Check(sm.GetLastError() == StateMachineError::StartEnterFailed, "Failed startup should keep StartEnterFailed");
+            ctx.Check(sm.GetQueuedEventCount() == 1, "Failed startup should not drain queued events");
         });
     });
 

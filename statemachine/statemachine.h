@@ -55,7 +55,6 @@ namespace Upp {
 		EventRejectedWhileTransitioning,
 		EventDroppedWhileTransitioning,
 		EventQueueFull,
-		EventQueueingNotImplemented,
 	};
 
 	// Only TriggerEvent() participates in queueing under QueueWhileTransitioning.

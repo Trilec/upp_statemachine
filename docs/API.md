@@ -88,7 +88,6 @@ Relevant transition-time event errors:
 - `EventRejectedWhileTransitioning`
 - `EventDroppedWhileTransitioning`
 - `EventQueueFull`
-- `EventQueueingNotImplemented`
 
 ### Logging
 

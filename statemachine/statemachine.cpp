@@ -100,7 +100,6 @@ static String GetStateMachineErrorText(StateMachineError error) {
     case StateMachineError::EventRejectedWhileTransitioning: return "Event rejected while transitioning";
     case StateMachineError::EventDroppedWhileTransitioning: return "Event dropped while transitioning";
     case StateMachineError::EventQueueFull: return "Event queue full";
-    case StateMachineError::EventQueueingNotImplemented: return "Event queueing not implemented";
     }
     return "Unknown error";
 }
@@ -240,6 +239,7 @@ bool StateMachine::Start() {
             transitionHistory.Add(MakeOne<TransitionRecord>("", start_initial, "__start"));
             transitioning = false;
             ClearError();
+            DrainQueuedEvents();
             return;
         }
 
@@ -542,9 +542,9 @@ bool StateMachine::DoTransition(const Transition& t,
                 last_error = StateMachineError::ExitFailed;
         }
         transitioning = false;
+        if (on_done) on_done(success);
         if (success)
             DrainQueuedEvents();
-        if (on_done) on_done(success);
     };
 
     auto on_exit_done = [this, toState, ctx, on_enter_done, exit_finished, enter_started, enter_finished, record](bool success) {
