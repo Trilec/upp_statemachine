@@ -42,8 +42,11 @@ Observed state during a successful normal transition:
 - `WhenTransitionStarted` and `OnBefore`: current state is still the source
   state and `IsTransitioning()` is `true`.
 - `OnExit`: current state is still the source state.
-- `OnEnter`: current state is the target state, but the transition is still
-  active.
+- `OnEnter`: current state is still the source state while the target entry
+  callback runs.
+- If `OnEnter` later fails, the machine rolls back to the source state, does
+  not commit history, clears transitioning, and does not run the finished/after
+  hooks.
 - `WhenTransitionFinished` and `OnAfter`: current state is already the target
   state and the history entry is committed.
 - After the callback chain unwinds, `IsTransitioning()` becomes `false`.

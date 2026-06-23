@@ -177,7 +177,11 @@ Observed state by callback phase for a successful normal transition:
 - `WhenTransitionStarted`: `GetCurrent() == source`, `IsStarted() == true`, `IsTransitioning() == true`
 - `OnBefore`: `GetCurrent() == source`, `IsStarted() == true`, `IsTransitioning() == true`
 - `OnExit`: `GetCurrent() == source`, `IsStarted() == true`, `IsTransitioning() == true`
-- `OnEnter`: `GetCurrent() == target`, `IsStarted() == true`, `IsTransitioning() == true`
+- `OnEnter`: `GetCurrent() == source`, `IsStarted() == true`, `IsTransitioning() == true`
+- If `OnEnter` later calls `done(false)`, `GetCurrent()` rolls back to the
+  source state, no history entry is committed, `IsTransitioning()` becomes
+  `false`, `GetLastError() == EnterFailed`, and `WhenTransitionFinished` /
+  `OnAfter` do not run.
 - `WhenTransitionFinished`: `GetCurrent() == target`, `IsStarted() == true`, `IsTransitioning() == true`
 - `OnAfter`: `GetCurrent() == target`, `IsStarted() == true`, `IsTransitioning() == true`
 - After completion: `GetCurrent() == target`, `IsStarted() == true`, `IsTransitioning() == false`

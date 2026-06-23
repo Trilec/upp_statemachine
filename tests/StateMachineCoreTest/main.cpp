@@ -32,7 +32,7 @@ bool SameOrder(const Vector<String>& actual, const Vector<String>& expected) {
     return true;
 }
 
-struct PhaseSnapshot {
+struct PhaseSnapshot : Moveable<PhaseSnapshot> {
     String phase;
     String current;
     bool started = false;
@@ -828,14 +828,16 @@ CONSOLE_APP_MAIN
     RunGroup("Consistency", passed, failed, [&](auto add) {
         add("Reset after failed transition leaves config reusable", [](TestContext& ctx) {
             StateMachine sm;
+            bool fail_exit = true;
             sm.SetInitial("A");
-            ctx.Check(sm.AddState({"A", [](auto&, auto done) { done(true); }, [](auto&, auto done) { done(false); } }), "State A should be added");
+            ctx.Check(sm.AddState({"A", [](auto&, auto done) { done(true); }, [&](auto&, auto done) { done(!fail_exit); } }), "State A should be added");
             ctx.Check(sm.AddState({"B", {}, {}}), "State B should be added");
             ctx.Check(sm.AddTransition({"go", "A", "B"}), "Transition should be added");
             ctx.Check(sm.Start(), "Start() should return true");
             ctx.Check(sm.TriggerEvent("go"), "TriggerEvent() should begin");
             ctx.Check(sm.GetCurrent() == "A", "Current state should remain A after failed transition");
             ctx.Check(sm.Reset(), "Reset() should return true after failure");
+            fail_exit = false;
             ctx.Check(sm.Start(), "Start() should work again after Reset()");
             ctx.Check(sm.TriggerEvent("go"), "Transition should work again after Reset()");
             ctx.Check(sm.GetCurrent() == "B", "Current state should be B after reused configuration");
@@ -1792,7 +1794,7 @@ CONSOLE_APP_MAIN
                 ctx.Check(order[i] == expected[i], "Callback order mismatch at step " + AsString(i));
         });
 
-        add("Callback phases observe committed target state", [](TestContext& ctx) {
+        add("Callback phases observe source during OnEnter", [](TestContext& ctx) {
             StateMachine sm;
             Vector<PhaseSnapshot> snapshots;
             auto capture = [&](const String& phase) {
@@ -1890,7 +1892,7 @@ CONSOLE_APP_MAIN
             check_snapshot(*started, "Idle", true, true, 1, StateMachineError::None, "WhenTransitionStarted");
             check_snapshot(*before, "Idle", true, true, 1, StateMachineError::None, "OnBefore");
             check_snapshot(*exit, "Idle", true, true, 1, StateMachineError::None, "OnExit");
-            check_snapshot(*enter, "Working", true, true, 1, StateMachineError::None, "OnEnter");
+            check_snapshot(*enter, "Idle", true, true, 1, StateMachineError::None, "OnEnter");
             check_snapshot(*finished, "Working", true, true, 2, StateMachineError::None, "WhenTransitionFinished");
             check_snapshot(*after, "Working", true, true, 2, StateMachineError::None, "OnAfter");
             check_snapshot(*complete, "Working", true, false, 2, StateMachineError::None, "After completion");
@@ -2594,7 +2596,7 @@ CONSOLE_APP_MAIN
 
             ctx.Check(sm.Start(), "Start() should return true");
             ctx.Check(sm.TriggerEvent("go"), "Transition should begin");
-            VerifyReentryOutcome(ctx, out, "OnEnter", "B", 1);
+            VerifyReentryOutcome(ctx, out, "OnEnter", "A", 1);
             ctx.Check(sm.GetCurrent() == "B", "Current state should still complete to B");
             ctx.Check(sm.GetHistoryCount() == 2, "History should remain committed after transition");
             ctx.Check(!sm.IsTransitioning(), "Machine should stop transitioning after callback chain completes");

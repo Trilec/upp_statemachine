@@ -529,7 +529,7 @@ bool StateMachine::DoTransition(const Transition& t,
         if (on_done) on_done(success);
     };
 
-    auto on_exit_done = [this, toState, ctx, on_enter_done, exit_finished, enter_started, record](bool success) {
+    auto on_exit_done = [this, toState, ctx, on_enter_done, exit_finished, enter_started, enter_finished, record](bool success) {
         if (*exit_finished)
             return;
         *exit_finished = true;
@@ -537,7 +537,9 @@ bool StateMachine::DoTransition(const Transition& t,
         if (success) {
             if (toState && toState->OnEnter) {
                 *enter_started = true;
-                toState->OnEnter(*this, [this, ctx, on_enter_done](bool enter_success) {
+                toState->OnEnter(*this, [this, ctx, on_enter_done, enter_finished](bool enter_success) {
+                    if (*enter_finished)
+                        return;
                     if (enter_success)
                         current = ctx.toState;
                     if (logging) {
