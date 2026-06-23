@@ -94,6 +94,10 @@ struct InvariantExpectation {
     int states = -1;
     int transitions = -1;
     bool can_go_back = false;
+    bool check_history_record = false;
+    String history_from;
+    String history_to;
+    String history_event;
     bool check_last_error = false;
     StateMachineError last_error = StateMachineError::None;
 };
@@ -115,6 +119,12 @@ static void CheckInvariants(TestContext& ctx, const StateMachine& sm, const Inva
     ctx.Check(sm.GetHistoryFrom(sm.GetHistoryCount()).IsEmpty(), label + ": out-of-range history from should be empty");
     ctx.Check(sm.GetHistoryTo(sm.GetHistoryCount()).IsEmpty(), label + ": out-of-range history to should be empty");
     ctx.Check(sm.GetHistoryEvent(sm.GetHistoryCount()).IsEmpty(), label + ": out-of-range history event should be empty");
+    if (e.check_history_record && sm.GetHistoryCount() > 0) {
+        const int last = sm.GetHistoryCount() - 1;
+        ctx.Check(sm.GetHistoryFrom(last) == e.history_from, label + ": latest history from mismatch");
+        ctx.Check(sm.GetHistoryTo(last) == e.history_to, label + ": latest history to mismatch");
+        ctx.Check(sm.GetHistoryEvent(last) == e.history_event, label + ": latest history event mismatch");
+    }
     if (sm.GetHistoryCount() > 0 && !sm.IsTransitioning())
         ctx.Check(sm.GetHistoryTo(sm.GetHistoryCount() - 1) == sm.GetCurrent(), label + ": current should match latest committed history");
     if (e.check_last_error)
@@ -701,8 +711,12 @@ CONSOLE_APP_MAIN
             ctx.Check(sm.AddTransition({"to_c", "B", "C"}), "Transition B->C should be added");
             ctx.Check(sm.Start(), "Start() should return true");
             ctx.Check(sm.TriggerEvent("to_b"), "A->B should begin");
+            ctx.Check(sm.GetCurrent() == "B", "Current should be B after A->B");
             ctx.Check(sm.TriggerEvent("to_c"), "B->C should begin");
+            ctx.Check(sm.GetCurrent() == "C", "Current should be C after B->C");
             ctx.Check(sm.GoBack(), "GoBack() should return true");
+            ctx.Check(sm.GetCurrent() == "C", "Current should stay C after failed GoBack()");
+            ctx.Check(sm.GetHistoryCount() == 3, "Failed GoBack() should keep history intact");
             ctx.Check(sm.GetLastError() == StateMachineError::BackTransitionFailed, "Last error should be BackTransitionFailed");
         });
 
@@ -720,9 +734,13 @@ CONSOLE_APP_MAIN
             ctx.Check(sm.AddTransition({"to_c", "B", "C"}), "Transition B->C should be added");
             ctx.Check(sm.Start(), "Start() should return true");
             ctx.Check(sm.TriggerEvent("to_b"), "A->B should begin");
+            ctx.Check(sm.GetCurrent() == "B", "Current should be B after A->B");
             ctx.Check(sm.TriggerEvent("to_c"), "B->C should begin");
+            ctx.Check(sm.GetCurrent() == "C", "Current should be C after B->C");
             allow_b_enter = false;
             ctx.Check(sm.GoBack(), "GoBack() should return true");
+            ctx.Check(sm.GetCurrent() == "C", "Failed GoBack() should leave current at C");
+            ctx.Check(sm.GetHistoryCount() == 3, "Failed GoBack() should keep history intact");
             ctx.Check(sm.GetLastError() == StateMachineError::BackTransitionFailed, "Last error should be BackTransitionFailed");
         });
     });
@@ -858,6 +876,21 @@ CONSOLE_APP_MAIN
             finish_start(true);
             ctx.Check(sm.IsStarted(), "Machine should still be started after async completion");
         });
+
+        add("Reset and Clear after failed Start stay reusable", [](TestContext& ctx) {
+            StateMachine sm;
+            sm.SetInitial("Missing");
+            ctx.Check(sm.AddState({"A", {}, {}}), "State A should be added");
+            ctx.Check(!sm.Start(), "Start() should fail with a missing initial state");
+            ctx.Check(sm.GetLastError() == StateMachineError::MissingState, "Missing Start() should set MissingState");
+            sm.ClearError();
+            ctx.Check(sm.GetLastError() == StateMachineError::None, "ClearError() should clear the missing-start error");
+            ctx.Check(sm.Reset(), "Reset() should succeed after failed Start()");
+            ctx.Check(sm.GetLastError() == StateMachineError::None, "Reset() should clear the missing-start error");
+            ctx.Check(sm.Clear(), "Clear() should succeed after failed Start()");
+            ctx.Check(!sm.HasInitial(), "Clear() should remove initial after failed Start()");
+            ctx.Check(sm.GetStateCount() == 0, "Clear() should remove states after failed Start()");
+        });
     });
 
     RunGroup("Consistency", passed, failed, [&](auto add) {
@@ -876,6 +909,26 @@ CONSOLE_APP_MAIN
             ctx.Check(sm.Start(), "Start() should work again after Reset()");
             ctx.Check(sm.TriggerEvent("go"), "Transition should work again after Reset()");
             ctx.Check(sm.GetCurrent() == "B", "Current state should be B after reused configuration");
+        });
+
+        add("Clear after failed transition requires reconfiguration", [](TestContext& ctx) {
+            StateMachine sm;
+            bool fail_enter = true;
+            sm.SetInitial("A");
+            ctx.Check(sm.AddState({"A", {}, {}}), "State A should be added");
+            ctx.Check(sm.AddState({"B", [&](auto&, auto done) { done(!fail_enter); }, {}}), "State B should be added");
+            ctx.Check(sm.AddTransition({"go", "A", "B"}), "Transition should be added");
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "Transition should begin");
+            ctx.Check(sm.GetCurrent() == "A", "Current state should remain A after failed transition");
+            ctx.Check(sm.Clear(), "Clear() should return true after failed transition");
+            ctx.Check(!sm.HasInitial(), "Clear() should remove the initial state after failure");
+            ctx.Check(sm.GetStateCount() == 0, "Clear() should remove states after failure");
+            ctx.Check(sm.GetTransitionCount() == 0, "Clear() should remove transitions after failure");
+            ctx.Check(sm.AddState({"X", {}, {}}), "Fresh state X should be added after Clear()");
+            ctx.Check(sm.SetInitial("X"), "SetInitial() should work after Clear()");
+            ctx.Check(sm.Start(), "Start() should work after Clear() and reconfigure");
+            ctx.Check(sm.GetCurrent() == "X", "Machine should start in X after Clear() reconfigure");
         });
 
         add("Clear after Reset leaves machine empty", [](TestContext& ctx) {
@@ -1017,14 +1070,20 @@ CONSOLE_APP_MAIN
                 bool started = false;
                 int history = 0;
                 StateMachineError last_error = StateMachineError::None;
+                Vector<String> history_from;
                 Vector<String> history_to;
+                Vector<String> history_event;
             } model;
 
             auto CommitStart = [&]() {
                 model.started = true;
                 model.current = "A";
+                model.history_from.Clear();
                 model.history_to.Clear();
+                model.history_event.Clear();
+                model.history_from.Add("");
                 model.history_to.Add("A");
+                model.history_event.Add("__start");
                 model.history = 1;
                 model.last_error = StateMachineError::None;
             };
@@ -1032,20 +1091,26 @@ CONSOLE_APP_MAIN
             auto CommitReset = [&]() {
                 model.started = false;
                 model.current.Clear();
+                model.history_from.Clear();
                 model.history_to.Clear();
+                model.history_event.Clear();
                 model.history = 0;
                 model.last_error = StateMachineError::None;
             };
 
-            auto CommitSuccess = [&](const String& to) {
+            auto CommitSuccess = [&](const String& from, const String& to, const String& event) {
                 model.current = to;
+                model.history_from.Add(from);
                 model.history_to.Add(to);
+                model.history_event.Add(event);
                 model.history = model.history_to.GetCount();
                 model.last_error = StateMachineError::None;
             };
 
             auto CommitGoBack = [&]() {
+                model.history_from.Drop();
                 model.history_to.Drop();
+                model.history_event.Drop();
                 model.history = model.history_to.GetCount();
                 model.current = model.history_to.Top();
                 model.last_error = StateMachineError::None;
@@ -1064,6 +1129,12 @@ CONSOLE_APP_MAIN
                 e.states = 3;
                 e.transitions = 4;
                 e.can_go_back = model.history > 1;
+                if (model.history > 0) {
+                    e.check_history_record = true;
+                    e.history_from = model.history_from.Top();
+                    e.history_to = model.history_to.Top();
+                    e.history_event = model.history_event.Top();
+                }
                 e.check_last_error = true;
                 e.last_error = model.last_error;
                 CheckInvariants(ctx, sm, e, label);
@@ -1114,7 +1185,7 @@ CONSOLE_APP_MAIN
                             else if (fail_enter)
                                 Fail(StateMachineError::EnterFailed);
                             else
-                                CommitSuccess("B");
+                                CommitSuccess("A", "B", "ab");
                         }
                         else if (model.current == "B" && event == "bc") {
                             if (fail_exit)
@@ -1122,7 +1193,7 @@ CONSOLE_APP_MAIN
                             else if (fail_enter)
                                 Fail(StateMachineError::EnterFailed);
                             else
-                                CommitSuccess("C");
+                                CommitSuccess("B", "C", "bc");
                         }
                         else if (model.current == "B" && event == "ba") {
                             if (fail_exit)
@@ -1130,7 +1201,7 @@ CONSOLE_APP_MAIN
                             else if (fail_enter)
                                 Fail(StateMachineError::EnterFailed);
                             else
-                                CommitSuccess("A");
+                                CommitSuccess("B", "A", "ba");
                         }
                         else if (model.current == "C" && event == "ca") {
                             if (fail_exit)
@@ -1138,7 +1209,7 @@ CONSOLE_APP_MAIN
                             else if (fail_enter)
                                 Fail(StateMachineError::EnterFailed);
                             else
-                                CommitSuccess("A");
+                                CommitSuccess("C", "A", "ca");
                         }
                     }
                     break;
@@ -1180,7 +1251,7 @@ CONSOLE_APP_MAIN
                         else if (fail_enter)
                             Fail(StateMachineError::EnterFailed);
                         else
-                            CommitSuccess(t.to);
+                            CommitSuccess(t.from, t.to, t.event);
                     }
                     break;
                 }
@@ -1313,7 +1384,19 @@ CONSOLE_APP_MAIN
             ctx.Check(sm.GetCurrent() == "A", "Initial current should be A");
             ctx.Check(sm.TriggerEvent("ab"), "A->B should begin");
             ctx.Check(sm.GetCurrent() == "B", "Current should be B after first transition");
-            CheckInvariants(ctx, sm, {"B", true, false, 2, 3, 2, true, true, StateMachineError::None}, "After first transition");
+            {
+                InvariantExpectation e;
+                e.current = "B";
+                e.started = true;
+                e.transitioning = false;
+                e.history = 2;
+                e.states = 3;
+                e.transitions = 2;
+                e.can_go_back = true;
+                e.check_last_error = true;
+                e.last_error = StateMachineError::None;
+                CheckInvariants(ctx, sm, e, "After first transition");
+            }
 
             fail_exit = true;
             ctx.Check(sm.TriggerEvent("ba"), "B->A should begin");
@@ -1322,7 +1405,18 @@ CONSOLE_APP_MAIN
             ctx.Check(sm.GetLastError() == StateMachineError::ExitFailed, "Failed transition should set ExitFailed");
 
             ctx.Check(sm.Reset(), "Reset() should succeed");
-            CheckInvariants(ctx, sm, {"", false, false, 0, 3, 2, false, true, StateMachineError::None}, "After Reset()");
+            {
+                InvariantExpectation e;
+                e.started = false;
+                e.transitioning = false;
+                e.history = 0;
+                e.states = 3;
+                e.transitions = 2;
+                e.can_go_back = false;
+                e.check_last_error = true;
+                e.last_error = StateMachineError::None;
+                CheckInvariants(ctx, sm, e, "After Reset()");
+            }
 
             fail_exit = false;
             fail_enter = false;
@@ -1331,7 +1425,18 @@ CONSOLE_APP_MAIN
             ctx.Check(sm.GetCurrent() == "B", "Current should be B after reuse");
 
             ctx.Check(sm.Clear(), "Clear() should succeed");
-            CheckInvariants(ctx, sm, {"", false, false, 0, 0, 0, false, true, StateMachineError::None}, "After Clear()");
+            {
+                InvariantExpectation e;
+                e.started = false;
+                e.transitioning = false;
+                e.history = 0;
+                e.states = 0;
+                e.transitions = 0;
+                e.can_go_back = false;
+                e.check_last_error = true;
+                e.last_error = StateMachineError::None;
+                CheckInvariants(ctx, sm, e, "After Clear()");
+            }
 
             alt_graph = true;
             ctx.Check(sm.SetInitial("B"), "SetInitial() should be allowed after Clear()");
@@ -1364,7 +1469,19 @@ CONSOLE_APP_MAIN
             ctx.Check(sm.Start(), "Start() should begin");
             ctx.Check(sm.IsStarted(), "Machine should be started while startup is pending");
             ctx.Check(sm.IsTransitioning(), "Machine should be transitioning while startup is pending");
-            CheckInvariants(ctx, sm, {"A", true, true, 0, 2, 1, false, true, StateMachineError::None}, "During pending startup");
+            {
+                InvariantExpectation e;
+                e.current = "A";
+                e.started = true;
+                e.transitioning = true;
+                e.history = 0;
+                e.states = 2;
+                e.transitions = 1;
+                e.can_go_back = false;
+                e.check_last_error = true;
+                e.last_error = StateMachineError::None;
+                CheckInvariants(ctx, sm, e, "During pending startup");
+            }
 
             ctx.Check(!sm.Reset(), "Reset() should be rejected while startup is pending");
             ctx.Check(!sm.Clear(), "Clear() should be rejected while startup is pending");
@@ -1375,7 +1492,19 @@ CONSOLE_APP_MAIN
             ctx.Check(sm.IsLoggingEnabled(), "EnableLogging() should still take effect while pending");
             ctx.Check(sm.GetEventPolicy() == EventPolicy::DropWhileTransitioning, "SetEventPolicy() should still take effect while pending");
             ctx.Check(sm.GetLastError() == StateMachineError::None, "SetEventPolicy() should clear the pending error");
-            CheckInvariants(ctx, sm, {"A", true, true, 0, 2, 1, false, true, StateMachineError::None}, "After pending policy change");
+            {
+                InvariantExpectation e;
+                e.current = "A";
+                e.started = true;
+                e.transitioning = true;
+                e.history = 0;
+                e.states = 2;
+                e.transitions = 1;
+                e.can_go_back = false;
+                e.check_last_error = true;
+                e.last_error = StateMachineError::None;
+                CheckInvariants(ctx, sm, e, "After pending policy change");
+            }
             sm.EnableLogging(false);
             ctx.Check(!sm.IsLoggingEnabled(), "EnableLogging() should be disable-able during pending startup");
 
@@ -1408,6 +1537,8 @@ CONSOLE_APP_MAIN
             sm.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
             ctx.Check(sm.GetEventPolicy() == EventPolicy::QueueWhileTransitioning, "SetEventPolicy() should store the selected policy");
             ctx.Check(sm.GetLastError() == StateMachineError::None, "SetEventPolicy() should clear the last error");
+            sm.EnableLogging(false);
+            ctx.Check(!sm.IsLoggingEnabled(), "Logging should be disabled before the test exits");
 
             ctx.Check(sm.AddState({"B", {}, {}}), "State B should be added");
             ctx.Check(sm.AddTransition({"go", "A", "B"}), "Transition should be added");
