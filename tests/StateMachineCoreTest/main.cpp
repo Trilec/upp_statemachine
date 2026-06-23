@@ -32,6 +32,166 @@ bool SameOrder(const Vector<String>& actual, const Vector<String>& expected) {
     return true;
 }
 
+struct PhaseSnapshot {
+    String phase;
+    String current;
+    bool started = false;
+    bool transitioning = false;
+    int history = 0;
+    StateMachineError last_error = StateMachineError::None;
+};
+
+struct ReentryOutcome {
+    String before_current;
+    String before_initial;
+    bool before_started = false;
+    bool before_transitioning = false;
+    int before_history = 0;
+    int before_states = 0;
+    int before_transitions = 0;
+    StateMachineError before_last_error = StateMachineError::None;
+
+    bool trigger_ok = true;
+    StateMachineError trigger_error = StateMachineError::None;
+    bool try_ok = true;
+    StateMachineError try_error = StateMachineError::None;
+    bool go_ok = true;
+    StateMachineError go_error = StateMachineError::None;
+    bool reset_ok = true;
+    StateMachineError reset_error = StateMachineError::None;
+    bool clear_ok = true;
+    StateMachineError clear_error = StateMachineError::None;
+    bool add_state_ok = true;
+    StateMachineError add_state_error = StateMachineError::None;
+    bool add_transition_ok = true;
+    StateMachineError add_transition_error = StateMachineError::None;
+    bool set_initial_ok = true;
+    StateMachineError set_initial_error = StateMachineError::None;
+    String current;
+    String initial;
+    bool started = false;
+    bool transitioning = false;
+    int history = 0;
+    int states = 0;
+    int transitions = 0;
+    StateMachineError last_error = StateMachineError::None;
+
+    String after_current;
+    String after_initial;
+    bool after_started = false;
+    bool after_transitioning = false;
+    int after_history = 0;
+    int after_states = 0;
+    int after_transitions = 0;
+    StateMachineError after_last_error = StateMachineError::None;
+};
+
+static ReentryOutcome CaptureReentry(StateMachine& sm) {
+    ReentryOutcome out;
+
+    out.before_current = sm.GetCurrent();
+    out.before_initial = sm.GetInitial();
+    out.before_started = sm.IsStarted();
+    out.before_transitioning = sm.IsTransitioning();
+    out.before_history = sm.GetHistoryCount();
+    out.before_states = sm.GetStateCount();
+    out.before_transitions = sm.GetTransitionCount();
+    out.before_last_error = sm.GetLastError();
+
+    Transition direct;
+    direct.event = "go";
+    direct.from = "A";
+    direct.to = "B";
+
+    out.trigger_ok = sm.TriggerEvent("go");
+    out.trigger_error = sm.GetLastError();
+
+    out.try_ok = sm.TryTransition(direct);
+    out.try_error = sm.GetLastError();
+
+    out.go_ok = sm.GoBack();
+    out.go_error = sm.GetLastError();
+
+    out.reset_ok = sm.Reset();
+    out.reset_error = sm.GetLastError();
+
+    out.clear_ok = sm.Clear();
+    out.clear_error = sm.GetLastError();
+
+    out.add_state_ok = sm.AddState({"Temp", {}, {}});
+    out.add_state_error = sm.GetLastError();
+
+    out.add_transition_ok = sm.AddTransition({"temp", "A", "Temp"});
+    out.add_transition_error = sm.GetLastError();
+
+    out.set_initial_ok = sm.SetInitial("Temp");
+    out.set_initial_error = sm.GetLastError();
+
+    out.current = sm.GetCurrent();
+    out.initial = sm.GetInitial();
+    out.started = sm.IsStarted();
+    out.transitioning = sm.IsTransitioning();
+    out.history = sm.GetHistoryCount();
+    out.states = sm.GetStateCount();
+    out.transitions = sm.GetTransitionCount();
+    out.last_error = sm.GetLastError();
+
+    out.after_current = out.current;
+    out.after_initial = out.initial;
+    out.after_started = out.started;
+    out.after_transitioning = out.transitioning;
+    out.after_history = out.history;
+    out.after_states = out.states;
+    out.after_transitions = out.transitions;
+    out.after_last_error = out.last_error;
+    return out;
+}
+
+static void CheckReentryStateStable(TestContext& ctx, const ReentryOutcome& out, const String& phase) {
+    ctx.Check(out.before_current == out.after_current, phase + ": current changed");
+    ctx.Check(out.before_initial == out.after_initial, phase + ": initial changed");
+    ctx.Check(out.before_started == out.after_started, phase + ": started changed");
+    ctx.Check(out.before_transitioning == out.after_transitioning, phase + ": transitioning changed");
+    ctx.Check(out.before_history == out.after_history, phase + ": history changed");
+    ctx.Check(out.before_states == out.after_states, phase + ": state count changed");
+    ctx.Check(out.before_transitions == out.after_transitions, phase + ": transition count changed");
+}
+
+static void VerifyReentryOutcome(TestContext& ctx, const ReentryOutcome& out, const String& phase, const String& expected_current, int expected_history) {
+    CheckReentryStateStable(ctx, out, phase);
+    ctx.Check(out.before_current == expected_current, phase + ": current before calls should stay stable");
+    ctx.Check(out.after_current == expected_current, phase + ": current after calls should stay stable");
+    ctx.Check(out.before_initial == "A", phase + ": initial before calls should stay A");
+    ctx.Check(out.after_initial == "A", phase + ": initial after calls should stay A");
+    ctx.Check(out.before_started, phase + ": machine should be started before reentrant calls");
+    ctx.Check(out.after_started, phase + ": machine should remain started after reentrant calls");
+    ctx.Check(out.before_transitioning, phase + ": machine should be transitioning before reentrant calls");
+    ctx.Check(out.after_transitioning, phase + ": machine should remain transitioning after reentrant calls");
+    ctx.Check(out.before_history == expected_history, phase + ": history before calls should match phase");
+    ctx.Check(out.after_history == expected_history, phase + ": history after calls should remain unchanged");
+    ctx.Check(out.before_states == 2 && out.after_states == 2, phase + ": state count should remain 2");
+    ctx.Check(out.before_transitions == 1 && out.after_transitions == 1, phase + ": transition count should remain 1");
+    ctx.Check(out.before_last_error == StateMachineError::None, phase + ": last error should be clear before reentrant calls");
+
+    ctx.Check(!out.trigger_ok, phase + ": TriggerEvent() should return false");
+    ctx.Check(out.trigger_error == StateMachineError::EventRejectedWhileTransitioning, phase + ": TriggerEvent() should set EventRejectedWhileTransitioning");
+    ctx.Check(!out.try_ok, phase + ": TryTransition() should return false");
+    ctx.Check(out.try_error == StateMachineError::TransitionInProgress, phase + ": TryTransition() should set TransitionInProgress");
+    ctx.Check(!out.go_ok, phase + ": GoBack() should return false");
+    ctx.Check(out.go_error == StateMachineError::TransitionInProgress, phase + ": GoBack() should set TransitionInProgress");
+    ctx.Check(!out.reset_ok, phase + ": Reset() should return false");
+    ctx.Check(out.reset_error == StateMachineError::TransitionInProgress, phase + ": Reset() should set TransitionInProgress");
+    ctx.Check(!out.clear_ok, phase + ": Clear() should return false");
+    ctx.Check(out.clear_error == StateMachineError::TransitionInProgress, phase + ": Clear() should set TransitionInProgress");
+    ctx.Check(!out.add_state_ok, phase + ": AddState() should return false");
+    ctx.Check(out.add_state_error == StateMachineError::AlreadyStarted, phase + ": AddState() should set AlreadyStarted");
+    ctx.Check(!out.add_transition_ok, phase + ": AddTransition() should return false");
+    ctx.Check(out.add_transition_error == StateMachineError::AlreadyStarted, phase + ": AddTransition() should set AlreadyStarted");
+    ctx.Check(!out.set_initial_ok, phase + ": SetInitial() should return false");
+    ctx.Check(out.set_initial_error == StateMachineError::AlreadyStarted, phase + ": SetInitial() should set AlreadyStarted");
+    ctx.Check(out.last_error == StateMachineError::AlreadyStarted, phase + ": final last error should reflect the last rejected config call");
+}
+
 template <class Fn>
 bool RunTest(const String& name, Fn fn) {
     TestContext ctx;
@@ -1632,6 +1792,110 @@ CONSOLE_APP_MAIN
                 ctx.Check(order[i] == expected[i], "Callback order mismatch at step " + AsString(i));
         });
 
+        add("Callback phases observe committed target state", [](TestContext& ctx) {
+            StateMachine sm;
+            Vector<PhaseSnapshot> snapshots;
+            auto capture = [&](const String& phase) {
+                PhaseSnapshot snap;
+                snap.phase = phase;
+                snap.current = sm.GetCurrent();
+                snap.started = sm.IsStarted();
+                snap.transitioning = sm.IsTransitioning();
+                snap.history = sm.GetHistoryCount();
+                snap.last_error = sm.GetLastError();
+                snapshots.Add(snap);
+            };
+
+            sm.SetInitial("Idle");
+            sm.AddState({
+                "Idle",
+                [&](auto&, auto done) {
+                    capture("Idle.OnEnter");
+                    done(true);
+                },
+                [&](auto&, auto done) {
+                    capture("Idle.OnExit");
+                    done(true);
+                }
+            });
+            sm.AddState({
+                "Working",
+                [&](auto&, auto done) {
+                    capture("Working.OnEnter");
+                    done(true);
+                },
+                {}
+            });
+
+            Transition t;
+            t.event = "start";
+            t.from = "Idle";
+            t.to = "Working";
+            t.Guard = [&](const TransitionContext&) {
+                capture("Guard");
+                return true;
+            };
+            t.OnBefore = [&](const TransitionContext&) { capture("OnBefore"); };
+            t.OnAfter = [&](const TransitionContext&) { capture("OnAfter"); };
+            sm.WhenTransitionStarted = [&](const TransitionContext&) {
+                capture("WhenTransitionStarted");
+            };
+            sm.WhenTransitionFinished = [&](const TransitionContext&) {
+                capture("WhenTransitionFinished");
+            };
+            sm.AddTransition(t);
+
+            ctx.Check(sm.Start(), "Start() should return true");
+            snapshots.Clear();
+
+            ctx.Check(sm.TriggerEvent("start"), "Transition should begin");
+            capture("After completion");
+
+            ctx.Check(snapshots.GetCount() == 8, "Should capture all transition phases plus completion");
+
+            auto find = [&](const String& phase) -> const PhaseSnapshot* {
+                for (const auto& snap : snapshots)
+                    if (snap.phase == phase)
+                        return &snap;
+                return nullptr;
+            };
+
+            const PhaseSnapshot* guard = find("Guard");
+            const PhaseSnapshot* started = find("WhenTransitionStarted");
+            const PhaseSnapshot* before = find("OnBefore");
+            const PhaseSnapshot* exit = find("Idle.OnExit");
+            const PhaseSnapshot* enter = find("Working.OnEnter");
+            const PhaseSnapshot* finished = find("WhenTransitionFinished");
+            const PhaseSnapshot* after = find("OnAfter");
+            const PhaseSnapshot* complete = find("After completion");
+
+            ctx.Check(guard, "Guard snapshot should exist");
+            ctx.Check(started, "WhenTransitionStarted snapshot should exist");
+            ctx.Check(before, "OnBefore snapshot should exist");
+            ctx.Check(exit, "OnExit snapshot should exist");
+            ctx.Check(enter, "OnEnter snapshot should exist");
+            ctx.Check(finished, "WhenTransitionFinished snapshot should exist");
+            ctx.Check(after, "OnAfter snapshot should exist");
+            ctx.Check(complete, "Completion snapshot should exist");
+
+            auto check_snapshot = [&](const PhaseSnapshot& snap, const String& current, bool started_flag, bool transitioning_flag, int history, StateMachineError error, const String& label) {
+                ctx.Check(snap.current == current, label + ": current state mismatch");
+                ctx.Check(snap.started == started_flag, label + ": started flag mismatch");
+                ctx.Check(snap.transitioning == transitioning_flag, label + ": transitioning flag mismatch");
+                ctx.Check(snap.history == history, label + ": history count mismatch");
+                ctx.Check(snap.last_error == error, label + ": last error mismatch");
+            };
+
+            check_snapshot(*guard, "Idle", true, false, 1, StateMachineError::None, "Guard");
+            check_snapshot(*started, "Idle", true, true, 1, StateMachineError::None, "WhenTransitionStarted");
+            check_snapshot(*before, "Idle", true, true, 1, StateMachineError::None, "OnBefore");
+            check_snapshot(*exit, "Idle", true, true, 1, StateMachineError::None, "OnExit");
+            check_snapshot(*enter, "Working", true, true, 1, StateMachineError::None, "OnEnter");
+            check_snapshot(*finished, "Working", true, true, 2, StateMachineError::None, "WhenTransitionFinished");
+            check_snapshot(*after, "Working", true, true, 2, StateMachineError::None, "OnAfter");
+            check_snapshot(*complete, "Working", true, false, 2, StateMachineError::None, "After completion");
+        });
+
         add("Guard false calls only Guard", [](TestContext& ctx) {
             StateMachine sm;
             Vector<String> order;
@@ -2254,6 +2518,598 @@ CONSOLE_APP_MAIN
             finish_enter(false);
 
             ctx.Check(finished_count == 1, "WhenTransitionFinished should be called once after double done()");
+        });
+    });
+
+    RunGroup("Reentrancy", passed, failed, [&](auto add) {
+        add("OnBefore rejects public calls without corrupting state", [&](TestContext& ctx) {
+            ReentryOutcome out;
+            StateMachine sm;
+            sm.SetEventPolicy(EventPolicy::RejectWhileTransitioning);
+            sm.SetInitial("A");
+            sm.AddState({
+                "A",
+                [](auto&, auto done) { done(true); },
+                [](auto&, auto done) { done(true); }
+            });
+            sm.AddState({"B", [](auto&, auto done) { done(true); }, {}});
+            Transition t;
+            t.event = "go";
+            t.from = "A";
+            t.to = "B";
+            t.OnBefore = [&](const TransitionContext&) {
+                out = CaptureReentry(sm);
+            };
+            sm.AddTransition(t);
+
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "Transition should begin");
+            VerifyReentryOutcome(ctx, out, "OnBefore", "A", 1);
+            ctx.Check(sm.GetCurrent() == "B", "Current state should still complete to B");
+            ctx.Check(sm.GetHistoryCount() == 2, "History should remain committed after transition");
+            ctx.Check(!sm.IsTransitioning(), "Machine should stop transitioning after callback chain completes");
+            ctx.Check(sm.GetLastError() == StateMachineError::None, "Successful transition should clear last error");
+        });
+
+        add("OnExit rejects public calls without corrupting state", [&](TestContext& ctx) {
+            ReentryOutcome out;
+            StateMachine sm;
+            sm.SetEventPolicy(EventPolicy::RejectWhileTransitioning);
+            sm.SetInitial("A");
+            sm.AddState({
+                "A",
+                [](auto&, auto done) { done(true); },
+                [&](auto&, auto done) {
+                    out = CaptureReentry(sm);
+                    done(true);
+                }
+            });
+            sm.AddState({"B", [](auto&, auto done) { done(true); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "Transition should begin");
+            VerifyReentryOutcome(ctx, out, "OnExit", "A", 1);
+            ctx.Check(sm.GetCurrent() == "B", "Current state should still complete to B");
+            ctx.Check(sm.GetHistoryCount() == 2, "History should remain committed after transition");
+            ctx.Check(!sm.IsTransitioning(), "Machine should stop transitioning after callback chain completes");
+            ctx.Check(sm.GetLastError() == StateMachineError::None, "Successful transition should clear last error");
+        });
+
+        add("OnEnter rejects public calls without corrupting state", [&](TestContext& ctx) {
+            ReentryOutcome out;
+            StateMachine sm;
+            sm.SetEventPolicy(EventPolicy::RejectWhileTransitioning);
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto done) { done(true); }, {}});
+            sm.AddState({
+                "B",
+                [&](auto&, auto done) {
+                    out = CaptureReentry(sm);
+                    done(true);
+                },
+                {}
+            });
+            sm.AddTransition({"go", "A", "B"});
+
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "Transition should begin");
+            VerifyReentryOutcome(ctx, out, "OnEnter", "B", 1);
+            ctx.Check(sm.GetCurrent() == "B", "Current state should still complete to B");
+            ctx.Check(sm.GetHistoryCount() == 2, "History should remain committed after transition");
+            ctx.Check(!sm.IsTransitioning(), "Machine should stop transitioning after callback chain completes");
+            ctx.Check(sm.GetLastError() == StateMachineError::None, "Successful transition should clear last error");
+        });
+
+        add("OnAfter rejects public calls without corrupting state", [&](TestContext& ctx) {
+            ReentryOutcome out;
+            StateMachine sm;
+            sm.SetEventPolicy(EventPolicy::RejectWhileTransitioning);
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto done) { done(true); }, {}});
+            sm.AddState({"B", [](auto&, auto done) { done(true); }, {}});
+            Transition t;
+            t.event = "go";
+            t.from = "A";
+            t.to = "B";
+            t.OnAfter = [&](const TransitionContext&) {
+                out = CaptureReentry(sm);
+            };
+            sm.AddTransition(t);
+
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "Transition should begin");
+            VerifyReentryOutcome(ctx, out, "OnAfter", "B", 2);
+            ctx.Check(sm.GetCurrent() == "B", "Current state should still complete to B");
+            ctx.Check(sm.GetHistoryCount() == 2, "History should remain committed after transition");
+            ctx.Check(!sm.IsTransitioning(), "Machine should stop transitioning after callback chain completes");
+            ctx.Check(sm.GetLastError() == StateMachineError::None, "Successful transition should clear last error");
+        });
+    });
+
+    RunGroup("Async edge cases", passed, failed, [&](auto add) {
+        auto run_start_order_case = [&](TestContext& ctx, const String& label, bool first_result, bool second_result) {
+            Function<void(bool)> finish_start;
+            int enter_count = 0;
+
+            StateMachine sm;
+            sm.SetInitial("A");
+            sm.AddState({"A", [&](StateMachine&, Function<void(bool)> done) {
+                ++enter_count;
+                finish_start = pick(done);
+            }, {}});
+
+            ctx.Check(sm.Start(), label + ": Start() should return true");
+            ctx.Check(sm.IsStarted(), label + ": machine should be started while initial OnEnter is pending");
+            ctx.Check(sm.IsTransitioning(), label + ": machine should be transitioning while initial OnEnter is pending");
+
+            finish_start(first_result);
+            if (first_result) {
+                ctx.Check(sm.IsStarted(), label + ": machine should stay started after done(true)");
+                ctx.Check(!sm.IsTransitioning(), label + ": machine should stop transitioning after done(true)");
+                ctx.Check(sm.GetCurrent() == "A", label + ": current state should be A after done(true)");
+                ctx.Check(sm.GetHistoryCount() == 1, label + ": history should contain one __start record after done(true)");
+                ctx.Check(sm.GetLastError() == StateMachineError::None, label + ": successful done(true) should clear the error");
+            }
+            else {
+                ctx.Check(!sm.IsStarted(), label + ": machine should roll back after done(false)");
+                ctx.Check(!sm.IsTransitioning(), label + ": machine should stop transitioning after done(false)");
+                ctx.Check(sm.GetCurrent().IsEmpty(), label + ": current state should be cleared after done(false)");
+                ctx.Check(sm.GetHistoryCount() == 0, label + ": failed startup should not record history");
+                ctx.Check(sm.GetLastError() == StateMachineError::StartEnterFailed, label + ": failed startup should set StartEnterFailed");
+            }
+
+            finish_start(second_result);
+            if (first_result) {
+                ctx.Check(sm.IsStarted(), label + ": duplicate done() should keep the machine started");
+                ctx.Check(!sm.IsTransitioning(), label + ": duplicate done() should not reopen transitioning");
+                ctx.Check(sm.GetCurrent() == "A", label + ": duplicate done() should keep current A");
+                ctx.Check(sm.GetHistoryCount() == 1, label + ": duplicate done() should not add history");
+                ctx.Check(sm.GetLastError() == StateMachineError::None, label + ": duplicate done() should not change the final error");
+            }
+            else {
+                ctx.Check(!sm.IsStarted(), label + ": duplicate done() should keep the machine stopped");
+                ctx.Check(!sm.IsTransitioning(), label + ": duplicate done() should keep transitioning false");
+                ctx.Check(sm.GetCurrent().IsEmpty(), label + ": duplicate done() should keep current cleared");
+                ctx.Check(sm.GetHistoryCount() == 0, label + ": duplicate done() should not add history");
+                ctx.Check(sm.GetLastError() == StateMachineError::StartEnterFailed, label + ": duplicate done() should not change the final error");
+            }
+
+            ctx.Check(enter_count == 1, label + ": initial OnEnter should run once");
+        };
+
+        add("Initial OnEnter completion orders are single-shot", [&](TestContext& ctx) {
+            run_start_order_case(ctx, "done(true) then done(true)", true, true);
+            run_start_order_case(ctx, "done(false) then done(false)", false, false);
+            run_start_order_case(ctx, "done(false) then done(true)", false, true);
+            run_start_order_case(ctx, "done(true) then done(false)", true, false);
+        });
+
+        auto run_exit_order_case = [&](TestContext& ctx, const String& label, bool first_result, bool second_result) {
+            Function<void(bool)> finish_exit;
+            int exit_count = 0;
+            int enter_count = 0;
+            int after_count = 0;
+            int finished_count = 0;
+
+            StateMachine sm;
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto done) { done(true); }, [&](StateMachine&, Function<void(bool)> done) {
+                ++exit_count;
+                finish_exit = pick(done);
+            }});
+            sm.AddState({"B", [&](StateMachine&, Function<void(bool)> done) {
+                ++enter_count;
+                done(true);
+            }, {}});
+            sm.WhenTransitionFinished = [&](const TransitionContext&) { ++finished_count; };
+
+            Transition t;
+            t.event = "go";
+            t.from = "A";
+            t.to = "B";
+            t.OnAfter = [&](const TransitionContext&) { ++after_count; };
+            sm.AddTransition(t);
+
+            ctx.Check(sm.Start(), label + ": Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), label + ": transition should begin");
+            ctx.Check(sm.IsTransitioning(), label + ": machine should be transitioning while OnExit is pending");
+
+            finish_exit(first_result);
+            if (first_result) {
+                ctx.Check(sm.IsStarted(), label + ": machine should remain started after done(true)");
+                ctx.Check(!sm.IsTransitioning(), label + ": machine should stop transitioning after done(true)");
+                ctx.Check(sm.GetCurrent() == "B", label + ": current state should be B after done(true)");
+                ctx.Check(sm.GetHistoryCount() == 2, label + ": history should contain the completed transition after done(true)");
+                ctx.Check(sm.GetLastError() == StateMachineError::None, label + ": successful done(true) should clear the error");
+                ctx.Check(enter_count == 1, label + ": target OnEnter should run once after done(true)");
+                ctx.Check(after_count == 1, label + ": OnAfter should run once after done(true)");
+                ctx.Check(finished_count == 1, label + ": WhenTransitionFinished should run once after done(true)");
+            }
+            else {
+                ctx.Check(sm.IsStarted(), label + ": machine should remain started after done(false)");
+                ctx.Check(!sm.IsTransitioning(), label + ": machine should stop transitioning after done(false)");
+                ctx.Check(sm.GetCurrent() == "A", label + ": current state should remain A after done(false)");
+                ctx.Check(sm.GetHistoryCount() == 1, label + ": failed exit should not add history");
+                ctx.Check(sm.GetLastError() == StateMachineError::ExitFailed, label + ": failed exit should set ExitFailed");
+                ctx.Check(enter_count == 0, label + ": target OnEnter should not run after failed exit");
+                ctx.Check(after_count == 0, label + ": OnAfter should not run after failed exit");
+                ctx.Check(finished_count == 0, label + ": WhenTransitionFinished should not run after failed exit");
+            }
+
+            finish_exit(second_result);
+            if (first_result) {
+                ctx.Check(sm.GetCurrent() == "B", label + ": duplicate done() should keep current B");
+                ctx.Check(sm.GetHistoryCount() == 2, label + ": duplicate done() should not add history");
+                ctx.Check(sm.GetLastError() == StateMachineError::None, label + ": duplicate done() should not change the final error");
+                ctx.Check(enter_count == 1, label + ": target OnEnter should still run once");
+                ctx.Check(after_count == 1, label + ": OnAfter should still run once");
+                ctx.Check(finished_count == 1, label + ": WhenTransitionFinished should still run once");
+            }
+            else {
+                ctx.Check(sm.GetCurrent() == "A", label + ": duplicate done() should keep current A");
+                ctx.Check(sm.GetHistoryCount() == 1, label + ": duplicate done() should not add history");
+                ctx.Check(sm.GetLastError() == StateMachineError::ExitFailed, label + ": duplicate done() should not change the final error");
+                ctx.Check(enter_count == 0, label + ": target OnEnter should still not run");
+                ctx.Check(after_count == 0, label + ": OnAfter should still not run");
+                ctx.Check(finished_count == 0, label + ": WhenTransitionFinished should still not run");
+            }
+
+            ctx.Check(!sm.IsTransitioning(), label + ": duplicate done() should keep transitioning false");
+            ctx.Check(exit_count == 1, label + ": source OnExit should run once");
+        };
+
+        add("OnExit completion orders are single-shot", [&](TestContext& ctx) {
+            run_exit_order_case(ctx, "done(true) then done(true)", true, true);
+            run_exit_order_case(ctx, "done(false) then done(false)", false, false);
+            run_exit_order_case(ctx, "done(false) then done(true)", false, true);
+            run_exit_order_case(ctx, "done(true) then done(false)", true, false);
+        });
+
+        auto run_enter_order_case = [&](TestContext& ctx, const String& label, bool first_result, bool second_result) {
+            Function<void(bool)> finish_enter;
+            int enter_count = 0;
+            int after_count = 0;
+            int finished_count = 0;
+
+            StateMachine sm;
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto done) { done(true); }, {}});
+            sm.AddState({"B", [&](StateMachine&, Function<void(bool)> done) {
+                ++enter_count;
+                finish_enter = pick(done);
+            }, {}});
+            sm.WhenTransitionFinished = [&](const TransitionContext&) { ++finished_count; };
+
+            Transition t;
+            t.event = "go";
+            t.from = "A";
+            t.to = "B";
+            t.OnAfter = [&](const TransitionContext&) { ++after_count; };
+            sm.AddTransition(t);
+
+            ctx.Check(sm.Start(), label + ": Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), label + ": transition should begin");
+            ctx.Check(sm.IsTransitioning(), label + ": machine should be transitioning while OnEnter is pending");
+
+            finish_enter(first_result);
+            if (first_result) {
+                ctx.Check(sm.IsStarted(), label + ": machine should remain started after done(true)");
+                ctx.Check(!sm.IsTransitioning(), label + ": machine should stop transitioning after done(true)");
+                ctx.Check(sm.GetCurrent() == "B", label + ": current state should be B after done(true)");
+                ctx.Check(sm.GetHistoryCount() == 2, label + ": history should contain the completed transition after done(true)");
+                ctx.Check(sm.GetLastError() == StateMachineError::None, label + ": successful done(true) should clear the error");
+                ctx.Check(after_count == 1, label + ": OnAfter should run once after done(true)");
+                ctx.Check(finished_count == 1, label + ": WhenTransitionFinished should run once after done(true)");
+            }
+            else {
+                ctx.Check(sm.IsStarted(), label + ": machine should remain started after done(false)");
+                ctx.Check(!sm.IsTransitioning(), label + ": machine should stop transitioning after done(false)");
+                ctx.Check(sm.GetCurrent() == "A", label + ": current state should remain A after done(false)");
+                ctx.Check(sm.GetHistoryCount() == 1, label + ": failed enter should not add history");
+                ctx.Check(sm.GetLastError() == StateMachineError::EnterFailed, label + ": failed enter should set EnterFailed");
+                ctx.Check(after_count == 0, label + ": OnAfter should not run after failed enter");
+                ctx.Check(finished_count == 0, label + ": WhenTransitionFinished should not run after failed enter");
+            }
+
+            finish_enter(second_result);
+            if (first_result) {
+                ctx.Check(sm.GetCurrent() == "B", label + ": duplicate done() should keep current B");
+                ctx.Check(sm.GetHistoryCount() == 2, label + ": duplicate done() should not add history");
+                ctx.Check(sm.GetLastError() == StateMachineError::None, label + ": duplicate done() should not change the final error");
+                ctx.Check(after_count == 1, label + ": OnAfter should still run once");
+                ctx.Check(finished_count == 1, label + ": WhenTransitionFinished should still run once");
+            }
+            else {
+                ctx.Check(sm.GetCurrent() == "A", label + ": duplicate done() should keep current A");
+                ctx.Check(sm.GetHistoryCount() == 1, label + ": duplicate done() should not add history");
+                ctx.Check(sm.GetLastError() == StateMachineError::EnterFailed, label + ": duplicate done() should not change the final error");
+                ctx.Check(after_count == 0, label + ": OnAfter should still not run");
+                ctx.Check(finished_count == 0, label + ": WhenTransitionFinished should still not run");
+            }
+
+            ctx.Check(!sm.IsTransitioning(), label + ": duplicate done() should keep transitioning false");
+            ctx.Check(enter_count == 1, label + ": target OnEnter should run once");
+        };
+
+        add("OnEnter completion orders are single-shot", [&](TestContext& ctx) {
+            run_enter_order_case(ctx, "done(true) then done(true)", true, true);
+            run_enter_order_case(ctx, "done(false) then done(false)", false, false);
+            run_enter_order_case(ctx, "done(false) then done(true)", false, true);
+            run_enter_order_case(ctx, "done(true) then done(false)", true, false);
+        });
+
+        add("Async exit failure skips target OnEnter", [](TestContext& ctx) {
+            Function<void(bool)> finish_exit;
+            int exit_count = 0;
+            int enter_count = 0;
+
+            StateMachine sm;
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto done) { done(true); }, [&](StateMachine&, Function<void(bool)> done) {
+                ++exit_count;
+                finish_exit = pick(done);
+            }});
+            sm.AddState({"B", [&](StateMachine&, Function<void(bool)> done) {
+                ++enter_count;
+                done(true);
+            }, {}});
+            sm.AddTransition({"go", "A", "B"});
+
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "Transition should begin");
+            finish_exit(false);
+
+            ctx.Check(!sm.IsTransitioning(), "Machine should stop transitioning after failed async OnExit");
+            ctx.Check(sm.GetCurrent() == "A", "Current state should remain A after failed async OnExit");
+            ctx.Check(sm.GetHistoryCount() == 1, "Failed async OnExit should not add history");
+            ctx.Check(sm.GetLastError() == StateMachineError::ExitFailed, "Failed async OnExit should set ExitFailed");
+            ctx.Check(exit_count == 1, "OnExit should run once");
+            ctx.Check(enter_count == 0, "OnEnter should not run when async OnExit fails");
+        });
+
+        add("Async enter failure rolls back current state", [](TestContext& ctx) {
+            Function<void(bool)> finish_enter;
+            int exit_count = 0;
+            int enter_count = 0;
+            int after_count = 0;
+            int finished_count = 0;
+
+            StateMachine sm;
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto done) { done(true); }, [&](StateMachine&, Function<void(bool)> done) {
+                ++exit_count;
+                done(true);
+            }});
+            sm.AddState({"B", [&](StateMachine&, Function<void(bool)> done) {
+                ++enter_count;
+                finish_enter = pick(done);
+            }, {}});
+            sm.WhenTransitionFinished = [&](const TransitionContext&) { ++finished_count; };
+            Transition t;
+            t.event = "go";
+            t.from = "A";
+            t.to = "B";
+            t.OnAfter = [&](const TransitionContext&) { ++after_count; };
+            sm.AddTransition(t);
+
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "Transition should begin");
+            finish_enter(false);
+
+            ctx.Check(!sm.IsTransitioning(), "Machine should stop transitioning after failed async OnEnter");
+            ctx.Check(sm.GetCurrent() == "A", "Current state should roll back to A after failed async OnEnter");
+            ctx.Check(sm.GetHistoryCount() == 1, "Failed async OnEnter should not add history");
+            ctx.Check(sm.GetLastError() == StateMachineError::EnterFailed, "Failed async OnEnter should set EnterFailed");
+            ctx.Check(exit_count == 1, "OnExit should run once");
+            ctx.Check(enter_count == 1, "OnEnter should run once");
+            ctx.Check(after_count == 0, "OnAfter should not run when async OnEnter fails");
+            ctx.Check(finished_count == 0, "WhenTransitionFinished should not run when async OnEnter fails");
+        });
+    });
+
+    RunGroup("Startup edge cases", passed, failed, [&](auto add) {
+        add("Async startup follows event policy", [](TestContext& ctx) {
+            Function<void(bool)> finish_start;
+
+            StateMachine sm;
+            sm.SetInitial("A");
+            sm.SetEventPolicy(EventPolicy::DropWhileTransitioning);
+            sm.AddState({"A", [&](StateMachine&, Function<void(bool)> done) {
+                finish_start = pick(done);
+            }, {}});
+            sm.AddState({"B", [](auto&, auto done) { done(true); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.IsStarted(), "Machine should be started while initial OnEnter is pending");
+            ctx.Check(sm.IsTransitioning(), "Machine should be transitioning while initial OnEnter is pending");
+            ctx.Check(!sm.TriggerEvent("go"), "TriggerEvent() should be rejected while startup is pending");
+            ctx.Check(sm.GetLastError() == StateMachineError::EventDroppedWhileTransitioning, "Startup policy should drop events while transitioning");
+
+            finish_start(true);
+            ctx.Check(sm.IsStarted(), "Machine should remain started after startup completes");
+            ctx.Check(!sm.IsTransitioning(), "Machine should stop transitioning after startup completes");
+            ctx.Check(sm.GetCurrent() == "A", "Current state should remain A after startup completes");
+        });
+
+        add("Reset and Clear are rejected during async startup", [](TestContext& ctx) {
+            Function<void(bool)> finish_start;
+
+            StateMachine sm;
+            sm.SetInitial("A");
+            sm.AddState({"A", [&](StateMachine&, Function<void(bool)> done) {
+                finish_start = pick(done);
+            }, {}});
+
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.IsStarted(), "Machine should be started while initial OnEnter is pending");
+            ctx.Check(sm.IsTransitioning(), "Machine should be transitioning while initial OnEnter is pending");
+            ctx.Check(!sm.Reset(), "Reset() should be rejected during async startup");
+            ctx.Check(!sm.Clear(), "Clear() should be rejected during async startup");
+            ctx.Check(sm.IsStarted(), "Rejected runtime calls should not clear started");
+            ctx.Check(sm.IsTransitioning(), "Rejected runtime calls should not clear transitioning");
+            ctx.Check(sm.GetCurrent() == "A", "Rejected runtime calls should not clear current");
+
+            finish_start(true);
+            ctx.Check(sm.IsStarted(), "Machine should remain started after startup completes");
+            ctx.Check(!sm.IsTransitioning(), "Machine should stop transitioning after startup completes");
+        });
+
+        add("Failed async startup rolls back runtime and history", [](TestContext& ctx) {
+            Function<void(bool)> finish_start;
+
+            StateMachine sm;
+            sm.SetInitial("A");
+            sm.AddState({"A", [&](StateMachine&, Function<void(bool)> done) {
+                finish_start = pick(done);
+            }, {}});
+
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.IsStarted(), "Machine should be started while initial OnEnter is pending");
+            ctx.Check(sm.IsTransitioning(), "Machine should be transitioning while initial OnEnter is pending");
+            finish_start(false);
+
+            ctx.Check(!sm.IsStarted(), "Failed async startup should clear started");
+            ctx.Check(!sm.IsTransitioning(), "Failed async startup should clear transitioning");
+            ctx.Check(sm.GetCurrent().IsEmpty(), "Failed async startup should clear current");
+            ctx.Check(sm.GetHistoryCount() == 0, "Failed async startup should clear history");
+            ctx.Check(sm.GetLastError() == StateMachineError::StartEnterFailed, "Failed async startup should set StartEnterFailed");
+        });
+
+        add("Startup double completion does not duplicate history", [](TestContext& ctx) {
+            Function<void(bool)> finish_start;
+
+            StateMachine sm;
+            sm.SetInitial("A");
+            sm.AddState({"A", [&](StateMachine&, Function<void(bool)> done) {
+                finish_start = pick(done);
+            }, {}});
+
+            ctx.Check(sm.Start(), "Start() should return true");
+            finish_start(true);
+            ctx.Check(sm.GetHistoryCount() == 1, "Successful startup should create exactly one history record");
+            ctx.Check(sm.GetHistoryEvent(0) == "__start", "Successful startup history event should be __start");
+            finish_start(false);
+            ctx.Check(sm.GetHistoryCount() == 1, "Duplicate startup completion should not add history");
+            ctx.Check(sm.GetCurrent() == "A", "Duplicate startup completion should not change current");
+            ctx.Check(sm.GetLastError() == StateMachineError::None, "Duplicate startup completion should not change the final error");
+        });
+    });
+
+    RunGroup("History invariants", passed, failed, [&](auto add) {
+        add("Successful startup creates exactly one __start record", [](TestContext& ctx) {
+            StateMachine sm;
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto done) { done(true); }, {}});
+
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.GetHistoryCount() == 1, "Start() should create one history record");
+            ctx.Check(sm.GetHistoryFrom(0).IsEmpty(), "Start history from-state should be empty");
+            ctx.Check(sm.GetHistoryTo(0) == "A", "Start history to-state should be A");
+            ctx.Check(sm.GetHistoryEvent(0) == "__start", "Start history event should be __start");
+        });
+
+        add("Failed startup creates no history", [](TestContext& ctx) {
+            Function<void(bool)> finish_start;
+
+            StateMachine sm;
+            sm.SetInitial("A");
+            sm.AddState({"A", [&](StateMachine&, Function<void(bool)> done) {
+                finish_start = pick(done);
+            }, {}});
+
+            ctx.Check(sm.Start(), "Start() should return true");
+            finish_start(false);
+            ctx.Check(sm.GetHistoryCount() == 0, "Failed startup should create no history");
+            ctx.Check(!sm.CanGoBack(), "Failed startup should leave no history to go back to");
+        });
+
+        add("Successful transition appends exactly one history entry", [](TestContext& ctx) {
+            StateMachine sm;
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto done) { done(true); }, {}});
+            sm.AddState({"B", [](auto&, auto done) { done(true); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "Transition should begin");
+            ctx.Check(sm.GetHistoryCount() == 2, "Successful transition should append one history entry");
+            ctx.Check(sm.GetHistoryFrom(1) == "A", "History from-state should be A");
+            ctx.Check(sm.GetHistoryTo(1) == "B", "History to-state should be B");
+            ctx.Check(sm.GetHistoryEvent(1) == "go", "History event should be go");
+        });
+
+        add("Rejected or failed transitions do not add history", [](TestContext& ctx) {
+            {
+                StateMachine sm;
+                sm.SetInitial("A");
+                sm.AddState({"A", [](auto&, auto done) { done(true); }, {}});
+                sm.AddState({"C", [](auto&, auto done) { done(true); }, {}});
+                Transition guard_blocked;
+                guard_blocked.event = "guard";
+                guard_blocked.from = "A";
+                guard_blocked.to = "C";
+                guard_blocked.Guard = [](const TransitionContext&) { return false; };
+                sm.AddTransition(guard_blocked);
+
+                ctx.Check(sm.Start(), "Guard rejection: Start() should return true");
+                const int history_before = sm.GetHistoryCount();
+                ctx.Check(!sm.TriggerEvent("guard"), "Guard rejection should return false");
+                ctx.Check(sm.GetHistoryCount() == history_before, "Guard rejection should not add history");
+            }
+
+            {
+                StateMachine sm;
+                sm.SetInitial("A");
+                sm.AddState({"A", [](auto&, auto done) { done(true); }, [&](auto&, auto done) { done(false); }});
+                sm.AddState({"B", [](auto&, auto done) { done(true); }, {}});
+                sm.AddTransition({"exit_fail", "A", "B"});
+
+                ctx.Check(sm.Start(), "Exit failure: Start() should return true");
+                const int history_before = sm.GetHistoryCount();
+                ctx.Check(sm.TriggerEvent("exit_fail"), "Failed OnExit should begin");
+                ctx.Check(sm.GetHistoryCount() == history_before, "Failed OnExit should not add history");
+            }
+
+            {
+                StateMachine sm;
+                sm.SetInitial("A");
+                sm.AddState({"A", [](auto&, auto done) { done(true); }, {}});
+                sm.AddState({"B", [](auto&, auto done) { done(false); }, {}});
+                sm.AddTransition({"enter_fail", "A", "B"});
+
+                ctx.Check(sm.Start(), "Enter failure: Start() should return true");
+                const int history_before = sm.GetHistoryCount();
+                ctx.Check(sm.TriggerEvent("enter_fail"), "Failed OnEnter should begin");
+                ctx.Check(sm.GetHistoryCount() == history_before, "Failed OnEnter should not add history");
+            }
+        });
+
+        add("GoBack, Reset, and Clear keep history consistent", [](TestContext& ctx) {
+            StateMachine sm;
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto done) { done(true); }, {}});
+            sm.AddState({"B", [](auto&, auto done) { done(true); }, {}});
+            sm.AddState({"C", [](auto&, auto done) { done(true); }, {}});
+            sm.AddTransition({"to_b", "A", "B"});
+            sm.AddTransition({"to_c", "B", "C"});
+
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("to_b"), "A->B should begin");
+            ctx.Check(sm.TriggerEvent("to_c"), "B->C should begin");
+            ctx.Check(sm.GetHistoryCount() == 3, "History should contain start plus two transitions");
+            ctx.Check(sm.GoBack(), "GoBack() should return true");
+            ctx.Check(sm.GetHistoryCount() == 2, "GoBack() should pop one history entry");
+            ctx.Check(sm.GetHistoryTo(1) == "B", "Remaining top history entry should point to B");
+            ctx.Check(sm.Reset(), "Reset() should return true");
+            ctx.Check(sm.GetHistoryCount() == 0, "Reset() should clear history");
+            ctx.Check(sm.AddState({"D", [](auto&, auto done) { done(true); }, {}}), "AddState() should still work after Reset()");
+            ctx.Check(sm.Clear(), "Clear() should return true");
+            ctx.Check(sm.GetHistoryCount() == 0, "Clear() should leave history empty");
+            ctx.Check(!sm.HasInitial(), "Clear() should remove the configured initial state");
+            ctx.Check(sm.GetStateCount() == 0, "Clear() should remove states");
+            ctx.Check(sm.GetTransitionCount() == 0, "Clear() should remove transitions");
         });
     });
 

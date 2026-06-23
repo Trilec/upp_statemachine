@@ -33,8 +33,20 @@ to orchestrate application logic and UI state changes.
 3. `TriggerEvent()` finds the matching transition for the current state.
 4. The transition guard runs, if present.
 5. The current state exits, then the target state enters.
-6. Transition hooks run around the state callbacks.
-7. The completed transition is recorded in history.
+6. The completed transition is recorded in history.
+7. Transition hooks run around the state callbacks.
+
+Observed state during a successful normal transition:
+
+- `Guard`: current state is the source state; transition is not yet active.
+- `WhenTransitionStarted` and `OnBefore`: current state is still the source
+  state and `IsTransitioning()` is `true`.
+- `OnExit`: current state is still the source state.
+- `OnEnter`: current state is the target state, but the transition is still
+  active.
+- `WhenTransitionFinished` and `OnAfter`: current state is already the target
+  state and the history entry is committed.
+- After the callback chain unwinds, `IsTransitioning()` becomes `false`.
 
 ## History
 
@@ -65,10 +77,17 @@ state without exposing the caller to the internal transition machinery.
 - During async initial `OnEnter`, `IsStarted()` and `IsTransitioning()` are both `true`.
 - If initial `OnEnter` later fails, startup rolls back and `IsStarted()` becomes `false`.
 - Machine-owned completion callbacks are single-shot.
+- The implementation assumes same-thread, same-callback-chain use unless the
+  API explicitly says otherwise.
+- Pending async callbacks hold a live reference to the machine, so the
+  `StateMachine` object must outlive them.
 - History inspection helpers expose the recorded entries for tests and diagnostics.
 - Logging is opt-in; normal transition flow is quiet unless enabled.
 - `TryTransition()` requires `t.from == current`.
 - `OnAfter` runs from the exact transition object passed into `DoTransition()`.
+- When successful transition completion callbacks run, `GetCurrent()` already
+  returns the target state, the history entry is committed, and
+  `IsTransitioning()` remains `true` until the callback chain unwinds.
 - `EventPolicy` is stored on the machine, but queueing is not implemented yet.
 - Current implemented behavior:
   - `RejectWhileTransitioning`
@@ -81,4 +100,5 @@ state without exposing the caller to the internal transition machinery.
   - `EventQueueingNotImplemented`
 - Event queueing is not implemented.
 - Transition cancellation is not implemented.
+- Hierarchical states are not implemented.
 - In this API, `true` usually means the operation was accepted or began; it does not imply async completion.

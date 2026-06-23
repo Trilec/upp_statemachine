@@ -9,6 +9,7 @@
 - Moved GUI test harness into `examples/StateMachineGuiTest/`.
 - Documented event policy as reject/drop implemented, queue declared but not yet implemented.
 - Hardened `Start()`, `TriggerEvent()`, and `TryTransition()` return values and state checks.
+- Committed transition history before `WhenTransitionFinished` and `OnAfter` so completion callbacks observe the finalized transition.
 - Added lightweight error reporting via `GetLastError()` and `GetLastErrorText()`.
 - Made `GoBack()` return `bool`.
 - Added `Reset()` for runtime-only reset and `Clear()` for full teardown.
@@ -26,6 +27,7 @@
 - Added non-GUI core test package under `tests/StateMachineCoreTest`.
 - Added API, testing, roadmap, and design documentation under `docs/`.
 - Added callback-order regression coverage.
+- Added callback-phase state snapshot coverage for transition lifecycle callbacks.
 - Added deterministic reporting test runner output.
 - Added grouped startup, transition, failure, callback ordering, async, history, and stress tests.
 - Added pasteable PASS/FAILED console output for review.

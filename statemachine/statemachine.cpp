@@ -501,20 +501,20 @@ bool StateMachine::DoTransition(const Transition& t,
     if (t.OnBefore)
         t.OnBefore(ctx);
 
-    // Chain exit → enter → after → finalize
+    // Chain exit → enter → finalize → after
     auto on_enter_done = [this, ctx, record, on_done, t, enter_finished, enter_started](bool success) {
         if (*enter_finished)
             return;
         *enter_finished = true;
 
         if (success) {
+            Finalize(ctx, record);
             if (WhenTransitionFinished)
                 WhenTransitionFinished(ctx);
 
             if (t.OnAfter)
                 t.OnAfter(ctx);
 
-            Finalize(ctx, record);
             ClearError();
         }
         else {
@@ -574,7 +574,7 @@ bool StateMachine::DoTransition(const Transition& t,
 }
 
 //------------------------------------------------------------------------------
-// Core transition logic (handles OnExit→OnEnter→OnAfter and history)
+// Core transition logic (handles OnExit→OnEnter→history→OnAfter)
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
 // Record history and dump if needed

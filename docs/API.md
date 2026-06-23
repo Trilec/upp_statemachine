@@ -128,9 +128,9 @@ is ignored or blocked.
 9. The current state's `OnExit` callback is called.
 10. The target state's `OnEnter` callback is called.
 11. If `OnEnter` succeeds, the current state is updated.
-12. `WhenTransitionFinished` is called.
-13. The transition `OnAfter` callback is called.
-14. The transition is recorded in history.
+12. The transition is recorded in history.
+13. `WhenTransitionFinished` is called.
+14. The transition `OnAfter` callback is called.
 15. The transitioning flag is cleared.
 
 Current implemented behavior:
@@ -152,6 +152,10 @@ policy determines the error:
 When `TriggerEvent()` fails, `GetLastError()` and `GetLastErrorText()` report
 the reason.
 
+`QueueWhileTransitioning` is declared as a policy value, but queue processing
+is not implemented yet. Cancellation and hierarchical states are not
+implemented.
+
 ## Callback order
 
 For a successful normal transition, the current tested order is:
@@ -162,6 +166,21 @@ For a successful normal transition, the current tested order is:
 4. `OnEnter`
 5. `WhenTransitionFinished`
 6. `OnAfter`
+
+At `WhenTransitionFinished` and `OnAfter`, `GetCurrent()` already returns the
+target state, the new history entry is present, and `IsTransitioning()` is
+still `true` until the transition callback chain unwinds.
+
+Observed state by callback phase for a successful normal transition:
+
+- `Guard`: `GetCurrent() == source`, `IsStarted() == true`, `IsTransitioning() == false`
+- `WhenTransitionStarted`: `GetCurrent() == source`, `IsStarted() == true`, `IsTransitioning() == true`
+- `OnBefore`: `GetCurrent() == source`, `IsStarted() == true`, `IsTransitioning() == true`
+- `OnExit`: `GetCurrent() == source`, `IsStarted() == true`, `IsTransitioning() == true`
+- `OnEnter`: `GetCurrent() == target`, `IsStarted() == true`, `IsTransitioning() == true`
+- `WhenTransitionFinished`: `GetCurrent() == target`, `IsStarted() == true`, `IsTransitioning() == true`
+- `OnAfter`: `GetCurrent() == target`, `IsStarted() == true`, `IsTransitioning() == true`
+- After completion: `GetCurrent() == target`, `IsStarted() == true`, `IsTransitioning() == false`
 
 ## TryTransition(t)
 
@@ -181,6 +200,9 @@ object passed into `DoTransition()`.
 
 When `TryTransition()` fails, `GetLastError()` and `GetLastErrorText()`
 report the reason.
+
+`true` means the operation was accepted or began. It does not mean async work
+has completed.
 
 ## Start()
 
@@ -212,6 +234,13 @@ becomes `false`.
 
 Machine-owned completion callbacks are single-shot: the first `done(true/false)`
 wins and duplicate completions are ignored.
+
+`true` means startup was accepted. It does not mean the async work has
+completed.
+
+The current implementation assumes same-thread, same-callback-chain use unless
+the API explicitly says otherwise. Pending async callbacks hold a live
+reference to the machine, so the `StateMachine` object must outlive them.
 
 When startup fails, `GetLastError()` and `GetLastErrorText()` report the
 reason.
