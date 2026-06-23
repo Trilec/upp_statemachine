@@ -86,6 +86,41 @@ struct ReentryOutcome {
     StateMachineError after_last_error = StateMachineError::None;
 };
 
+struct InvariantExpectation {
+    String current;
+    bool started = false;
+    bool transitioning = false;
+    int history = 0;
+    int states = -1;
+    int transitions = -1;
+    bool can_go_back = false;
+    bool check_last_error = false;
+    StateMachineError last_error = StateMachineError::None;
+};
+
+static void CheckInvariants(TestContext& ctx, const StateMachine& sm, const InvariantExpectation& e, const String& label) {
+    ctx.Check(sm.GetCurrent() == e.current, label + ": current mismatch");
+    ctx.Check(sm.IsStarted() == e.started, label + ": started mismatch");
+    ctx.Check(sm.IsTransitioning() == e.transitioning, label + ": transitioning mismatch");
+    ctx.Check(sm.GetHistoryCount() == e.history, label + ": history count mismatch");
+    ctx.Check(sm.GetHistoryCount() >= 0, label + ": history count should never be negative");
+    if (e.states >= 0)
+        ctx.Check(sm.GetStateCount() == e.states, label + ": state count mismatch");
+    if (e.transitions >= 0)
+        ctx.Check(sm.GetTransitionCount() == e.transitions, label + ": transition count mismatch");
+    ctx.Check(sm.CanGoBack() == e.can_go_back, label + ": CanGoBack() mismatch");
+    ctx.Check(sm.GetHistoryFrom(-1).IsEmpty(), label + ": negative history from should be empty");
+    ctx.Check(sm.GetHistoryTo(-1).IsEmpty(), label + ": negative history to should be empty");
+    ctx.Check(sm.GetHistoryEvent(-1).IsEmpty(), label + ": negative history event should be empty");
+    ctx.Check(sm.GetHistoryFrom(sm.GetHistoryCount()).IsEmpty(), label + ": out-of-range history from should be empty");
+    ctx.Check(sm.GetHistoryTo(sm.GetHistoryCount()).IsEmpty(), label + ": out-of-range history to should be empty");
+    ctx.Check(sm.GetHistoryEvent(sm.GetHistoryCount()).IsEmpty(), label + ": out-of-range history event should be empty");
+    if (sm.GetHistoryCount() > 0 && !sm.IsTransitioning())
+        ctx.Check(sm.GetHistoryTo(sm.GetHistoryCount() - 1) == sm.GetCurrent(), label + ": current should match latest committed history");
+    if (e.check_last_error)
+        ctx.Check(sm.GetLastError() == e.last_error, label + ": last error mismatch");
+}
+
 static ReentryOutcome CaptureReentry(StateMachine& sm) {
     ReentryOutcome out;
 
@@ -940,6 +975,445 @@ CONSOLE_APP_MAIN
             ctx.Check(sm.Start(), "Start() should return true");
             ctx.Check(!sm.GoBack(), "GoBack() should return false with no history");
             ctx.Check(sm.GetCurrent() == "A", "Current state should remain A after rejected GoBack()");
+        });
+    });
+
+    RunGroup("Sequence robustness", passed, failed, [&](auto add) {
+        add("Seeded random sequence stays consistent", [](TestContext& ctx) {
+            const unsigned seed0 = 0x5EED1234u;
+            unsigned seed = seed0;
+            Cout() << "Seed: " << seed0 << "\n";
+
+            auto Next = [&](unsigned& s) -> unsigned {
+                s = s * 1664525u + 1013904223u;
+                return s;
+            };
+            auto Pick = [&](unsigned& s, int mod) -> int {
+                return int((Next(s) >> 8) % unsigned(mod));
+            };
+
+            bool allow_ab = true;
+            bool fail_exit = false;
+            bool fail_enter = false;
+
+            StateMachine sm;
+            sm.SetInitial("A");
+            ctx.Check(sm.AddState({"A", [](auto&, auto done) { done(true); }, [&](StateMachine&, Function<void(bool)> done) { done(!fail_exit); }}), "State A should be added");
+            ctx.Check(sm.AddState({"B", [&](StateMachine&, Function<void(bool)> done) { done(!fail_enter); }, [&](StateMachine&, Function<void(bool)> done) { done(!fail_exit); }}), "State B should be added");
+            ctx.Check(sm.AddState({"C", [&](StateMachine&, Function<void(bool)> done) { done(!fail_enter); }, [&](StateMachine&, Function<void(bool)> done) { done(!fail_exit); }}), "State C should be added");
+
+            Transition ab;
+            ab.event = "ab";
+            ab.from = "A";
+            ab.to = "B";
+            ab.Guard = [&](const TransitionContext&) { return allow_ab; };
+            ctx.Check(sm.AddTransition(ab), "Transition A->B should be added");
+            ctx.Check(sm.AddTransition({"bc", "B", "C"}), "Transition B->C should be added");
+            ctx.Check(sm.AddTransition({"ca", "C", "A"}), "Transition C->A should be added");
+            ctx.Check(sm.AddTransition({"ba", "B", "A"}), "Transition B->A should be added");
+
+            struct Model {
+                String current;
+                bool started = false;
+                int history = 0;
+                StateMachineError last_error = StateMachineError::None;
+                Vector<String> history_to;
+            } model;
+
+            auto CommitStart = [&]() {
+                model.started = true;
+                model.current = "A";
+                model.history_to.Clear();
+                model.history_to.Add("A");
+                model.history = 1;
+                model.last_error = StateMachineError::None;
+            };
+
+            auto CommitReset = [&]() {
+                model.started = false;
+                model.current.Clear();
+                model.history_to.Clear();
+                model.history = 0;
+                model.last_error = StateMachineError::None;
+            };
+
+            auto CommitSuccess = [&](const String& to) {
+                model.current = to;
+                model.history_to.Add(to);
+                model.history = model.history_to.GetCount();
+                model.last_error = StateMachineError::None;
+            };
+
+            auto CommitGoBack = [&]() {
+                model.history_to.Drop();
+                model.history = model.history_to.GetCount();
+                model.current = model.history_to.Top();
+                model.last_error = StateMachineError::None;
+            };
+
+            auto Fail = [&](StateMachineError e) {
+                model.last_error = e;
+            };
+
+            auto Expect = [&](const String& label) {
+                InvariantExpectation e;
+                e.current = model.current;
+                e.started = model.started;
+                e.transitioning = false;
+                e.history = model.history;
+                e.states = 3;
+                e.transitions = 4;
+                e.can_go_back = model.history > 1;
+                e.check_last_error = true;
+                e.last_error = model.last_error;
+                CheckInvariants(ctx, sm, e, label);
+            };
+
+            ctx.Check(sm.Start(), "Initial Start() should succeed");
+            CommitStart();
+            Expect("After initial Start()");
+
+            for (int step = 0; step < 240; ++step) {
+                allow_ab = Pick(seed, 5) != 0;
+                fail_exit = Pick(seed, 8) == 0;
+                fail_enter = Pick(seed, 8) == 0;
+
+                const int op = Pick(seed, 8);
+                switch (op) {
+                case 0: {
+                    String event;
+                    if (model.current == "A")
+                        event = "ab";
+                    else if (model.current == "B")
+                        event = (Pick(seed, 2) == 0) ? "bc" : "ba";
+                    else if (model.current == "C")
+                        event = "ca";
+                    else
+                        event = "xx";
+                    if (Pick(seed, 6) == 0)
+                        event = "xx";
+
+                    const bool ok = sm.TriggerEvent(event);
+                    if (!model.started) {
+                        ctx.Check(!ok, "TriggerEvent() should be rejected before Start()");
+                        Fail(StateMachineError::NotStarted);
+                    }
+                    else if (event == "xx") {
+                        ctx.Check(!ok, "Invalid TriggerEvent() should be rejected");
+                        Fail(StateMachineError::NoMatchingTransition);
+                    }
+                    else if (model.current == "A" && event == "ab" && !allow_ab) {
+                        ctx.Check(!ok, "Guard-blocked TriggerEvent() should be rejected");
+                        Fail(StateMachineError::GuardRejected);
+                    }
+                    else {
+                        ctx.Check(ok, "Valid TriggerEvent() should begin");
+                        if (model.current == "A" && event == "ab") {
+                            if (fail_exit)
+                                Fail(StateMachineError::ExitFailed);
+                            else if (fail_enter)
+                                Fail(StateMachineError::EnterFailed);
+                            else
+                                CommitSuccess("B");
+                        }
+                        else if (model.current == "B" && event == "bc") {
+                            if (fail_exit)
+                                Fail(StateMachineError::ExitFailed);
+                            else if (fail_enter)
+                                Fail(StateMachineError::EnterFailed);
+                            else
+                                CommitSuccess("C");
+                        }
+                        else if (model.current == "B" && event == "ba") {
+                            if (fail_exit)
+                                Fail(StateMachineError::ExitFailed);
+                            else if (fail_enter)
+                                Fail(StateMachineError::EnterFailed);
+                            else
+                                CommitSuccess("A");
+                        }
+                        else if (model.current == "C" && event == "ca") {
+                            if (fail_exit)
+                                Fail(StateMachineError::ExitFailed);
+                            else if (fail_enter)
+                                Fail(StateMachineError::EnterFailed);
+                            else
+                                CommitSuccess("A");
+                        }
+                    }
+                    break;
+                }
+                case 1: {
+                    Transition t;
+                    t.event = "manual";
+                    if (model.current == "A") {
+                        t.from = "A";
+                        t.to = "B";
+                        t.Guard = [&](const TransitionContext&) { return allow_ab; };
+                    }
+                    else if (model.current == "B") {
+                        t.from = "B";
+                        t.to = (Pick(seed, 2) == 0) ? "C" : "A";
+                    }
+                    else {
+                        t.from = "C";
+                        t.to = "A";
+                    }
+
+                    const bool ok = sm.TryTransition(t);
+                    if (!model.started) {
+                        ctx.Check(!ok, "TryTransition() should be rejected before Start()");
+                        Fail(StateMachineError::NotStarted);
+                    }
+                    else if (t.from != model.current) {
+                        ctx.Check(!ok, "TryTransition() from the wrong state should be rejected");
+                        Fail(StateMachineError::WrongSourceState);
+                    }
+                    else if (t.Guard && !t.Guard(TransitionContext(sm, t.from, t.to, t.event))) {
+                        ctx.Check(!ok, "Guard-blocked TryTransition() should be rejected");
+                        Fail(StateMachineError::GuardRejected);
+                    }
+                    else {
+                        ctx.Check(ok, "Valid TryTransition() should begin");
+                        if (fail_exit)
+                            Fail(StateMachineError::ExitFailed);
+                        else if (fail_enter)
+                            Fail(StateMachineError::EnterFailed);
+                        else
+                            CommitSuccess(t.to);
+                    }
+                    break;
+                }
+                case 2: {
+                    Transition t;
+                    t.event = "manual";
+                    if (model.current == "A") {
+                        t.from = "B";
+                        t.to = "C";
+                    }
+                    else if (model.current == "B") {
+                        t.from = "A";
+                        t.to = "B";
+                    }
+                    else {
+                        t.from = "A";
+                        t.to = "B";
+                    }
+                    const bool ok = sm.TryTransition(t);
+                    if (!model.started) {
+                        ctx.Check(!ok, "TryTransition() should be rejected before Start()");
+                        Fail(StateMachineError::NotStarted);
+                    }
+                    else {
+                        ctx.Check(!ok, "TryTransition() with the wrong source should be rejected");
+                        Fail(StateMachineError::WrongSourceState);
+                    }
+                    break;
+                }
+                case 3: {
+                    Transition t;
+                    t.event = "manual";
+                    if (model.started) {
+                        t.from = model.current;
+                        t.to = "Z";
+                    }
+                    else {
+                        t.from = "A";
+                        t.to = "Z";
+                    }
+                    const bool ok = sm.TryTransition(t);
+                    if (!model.started) {
+                        ctx.Check(!ok, "TryTransition() should be rejected before Start()");
+                        Fail(StateMachineError::NotStarted);
+                    }
+                    else {
+                        ctx.Check(!ok, "TryTransition() with a missing target should be rejected");
+                        Fail(StateMachineError::MissingToState);
+                    }
+                    break;
+                }
+                case 4: {
+                    const bool ok = sm.GoBack();
+                    if (!model.started) {
+                        ctx.Check(!ok, "GoBack() should be rejected before Start()");
+                        Fail(StateMachineError::NotStarted);
+                    }
+                    else if (model.history <= 1) {
+                        ctx.Check(!ok, "GoBack() without history should be rejected");
+                        Fail(StateMachineError::NoMatchingTransition);
+                    }
+                    else if (fail_exit || fail_enter) {
+                        ctx.Check(ok, "GoBack() should begin even if it later fails");
+                        Fail(StateMachineError::BackTransitionFailed);
+                    }
+                    else {
+                        ctx.Check(ok, "GoBack() should succeed when history allows it");
+                        CommitGoBack();
+                    }
+                    break;
+                }
+                case 5: {
+                    const bool ok = sm.Reset();
+                    ctx.Check(ok, "Reset() should succeed in the sync sequence");
+                    CommitReset();
+                    break;
+                }
+                case 6: {
+                    const bool ok = sm.Start();
+                    if (model.started) {
+                        ctx.Check(!ok, "Start() should be rejected when already started");
+                        Fail(StateMachineError::AlreadyStarted);
+                    }
+                    else {
+                        ctx.Check(ok, "Start() should succeed after Reset()");
+                        CommitStart();
+                    }
+                    break;
+                }
+                case 7: {
+                    const bool ok = sm.Start();
+                    if (model.started) {
+                        ctx.Check(!ok, "Repeated Start() should be rejected");
+                        Fail(StateMachineError::AlreadyStarted);
+                    }
+                    else {
+                        ctx.Check(ok, "Start() should succeed");
+                        CommitStart();
+                    }
+                    break;
+                }
+                }
+
+                Expect("Random step " + AsString(step));
+            }
+        });
+
+        add("Reset and Clear reuse stays clean", [](TestContext& ctx) {
+            bool fail_exit = false;
+            bool fail_enter = false;
+            bool alt_graph = false;
+
+            auto Configure = [&](StateMachine& sm) {
+                ctx.Check(sm.AddState({"A", [](auto&, auto done) { done(true); }, [&](StateMachine&, Function<void(bool)> done) { done(!fail_exit); }}), "State A should be added");
+                ctx.Check(sm.AddState({"B", [&](StateMachine&, Function<void(bool)> done) { done(!fail_enter); }, [&](StateMachine&, Function<void(bool)> done) { done(!fail_exit); }}), "State B should be added");
+                ctx.Check(sm.AddState({"C", [&](StateMachine&, Function<void(bool)> done) { done(!fail_enter); }, [&](StateMachine&, Function<void(bool)> done) { done(!fail_exit); }}), "State C should be added");
+                if (alt_graph)
+                    ctx.Check(sm.AddTransition({"bc", "B", "C"}), "Transition B->C should be added");
+                else {
+                    ctx.Check(sm.AddTransition({"ab", "A", "B"}), "Transition A->B should be added");
+                    ctx.Check(sm.AddTransition({"ba", "B", "A"}), "Transition B->A should be added");
+                }
+            };
+
+            StateMachine sm;
+            sm.SetInitial("A");
+            Configure(sm);
+
+            ctx.Check(sm.Start(), "Start() should succeed");
+            ctx.Check(sm.GetCurrent() == "A", "Initial current should be A");
+            ctx.Check(sm.TriggerEvent("ab"), "A->B should begin");
+            ctx.Check(sm.GetCurrent() == "B", "Current should be B after first transition");
+            CheckInvariants(ctx, sm, {"B", true, false, 2, 3, 2, true, true, StateMachineError::None}, "After first transition");
+
+            fail_exit = true;
+            ctx.Check(sm.TriggerEvent("ba"), "B->A should begin");
+            ctx.Check(sm.GetCurrent() == "B", "Failed transition should keep current B");
+            ctx.Check(sm.GetHistoryCount() == 2, "Failed transition should not add history");
+            ctx.Check(sm.GetLastError() == StateMachineError::ExitFailed, "Failed transition should set ExitFailed");
+
+            ctx.Check(sm.Reset(), "Reset() should succeed");
+            CheckInvariants(ctx, sm, {"", false, false, 0, 3, 2, false, true, StateMachineError::None}, "After Reset()");
+
+            fail_exit = false;
+            fail_enter = false;
+            ctx.Check(sm.Start(), "Start() should succeed after Reset()");
+            ctx.Check(sm.TriggerEvent("ab"), "A->B should begin after Reset()");
+            ctx.Check(sm.GetCurrent() == "B", "Current should be B after reuse");
+
+            ctx.Check(sm.Clear(), "Clear() should succeed");
+            CheckInvariants(ctx, sm, {"", false, false, 0, 0, 0, false, true, StateMachineError::None}, "After Clear()");
+
+            alt_graph = true;
+            ctx.Check(sm.SetInitial("B"), "SetInitial() should be allowed after Clear()");
+            Configure(sm);
+            ctx.Check(sm.Start(), "Start() should succeed after reconfigure");
+            ctx.Check(sm.GetCurrent() == "B", "Reconfigured machine should start in B");
+            ctx.Check(sm.TriggerEvent("bc"), "B->C should work in alternate graph");
+            ctx.Check(sm.GetCurrent() == "C", "Current should be C in alternate graph");
+            ctx.Check(!sm.TriggerEvent("ab"), "A->B should be unavailable in alternate graph");
+            ctx.Check(sm.GetCurrent() == "C", "Current should stay C after rejected A->B");
+        });
+
+        add("Pending async callbacks reject mutation and complete safely", [](TestContext& ctx) {
+            Function<void(bool)> finish_start;
+            bool fail_exit = false;
+            bool fail_enter = false;
+
+            StateMachine sm;
+            sm.SetInitial("A");
+            ctx.Check(sm.AddState({"A", [&](StateMachine&, Function<void(bool)> done) {
+                finish_start = pick(done);
+            }, [&](StateMachine&, Function<void(bool)> done) {
+                done(!fail_exit);
+            }}), "State A should be added");
+            ctx.Check(sm.AddState({"B", [&](StateMachine&, Function<void(bool)> done) {
+                done(!fail_enter);
+            }, {}}), "State B should be added");
+            ctx.Check(sm.AddTransition({"ab", "A", "B"}), "Transition A->B should be added");
+
+            ctx.Check(sm.Start(), "Start() should begin");
+            ctx.Check(sm.IsStarted(), "Machine should be started while startup is pending");
+            ctx.Check(sm.IsTransitioning(), "Machine should be transitioning while startup is pending");
+            CheckInvariants(ctx, sm, {"A", true, true, 0, 2, 1, false, true, StateMachineError::None}, "During pending startup");
+
+            ctx.Check(!sm.Reset(), "Reset() should be rejected while startup is pending");
+            ctx.Check(!sm.Clear(), "Clear() should be rejected while startup is pending");
+            ctx.Check(!sm.TriggerEvent("ab"), "TriggerEvent() should be rejected while startup is pending");
+            ctx.Check(!sm.TryTransition({"ab", "A", "B"}), "TryTransition() should be rejected while startup is pending");
+            sm.EnableLogging(true);
+            sm.SetEventPolicy(EventPolicy::DropWhileTransitioning);
+            ctx.Check(sm.IsLoggingEnabled(), "EnableLogging() should still take effect while pending");
+            ctx.Check(sm.GetEventPolicy() == EventPolicy::DropWhileTransitioning, "SetEventPolicy() should still take effect while pending");
+            ctx.Check(sm.GetLastError() == StateMachineError::None, "SetEventPolicy() should clear the pending error");
+            CheckInvariants(ctx, sm, {"A", true, true, 0, 2, 1, false, true, StateMachineError::None}, "After pending policy change");
+            sm.EnableLogging(false);
+            ctx.Check(!sm.IsLoggingEnabled(), "EnableLogging() should be disable-able during pending startup");
+
+            finish_start(true);
+            ctx.Check(!sm.IsTransitioning(), "Startup should finish after done(true)");
+            ctx.Check(sm.GetCurrent() == "A", "Current should remain A after startup completion");
+            ctx.Check(sm.GetHistoryCount() == 1, "Startup should record exactly one history entry");
+            ctx.Check(sm.GetLastError() == StateMachineError::None, "Successful startup should clear the error");
+            finish_start(true);
+            ctx.Check(sm.GetHistoryCount() == 1, "Duplicate startup completion should be ignored");
+            ctx.Check(sm.GetCurrent() == "A", "Duplicate startup completion should not change current");
+        });
+
+        add("Public misuse stays contained", [](TestContext& ctx) {
+            StateMachine sm;
+            ctx.Check(!sm.TriggerEvent(""), "TriggerEvent() should reject empty event before Start()");
+            ctx.Check(sm.GetLastError() == StateMachineError::NotStarted, "Empty TriggerEvent() before Start() should still report NotStarted");
+
+            sm.SetInitial("Missing");
+            ctx.Check(sm.AddState({"A", {}, {}}), "State A should be added");
+            ctx.Check(!sm.Start(), "Start() should fail with missing initial state");
+            ctx.Check(sm.GetLastError() == StateMachineError::MissingState, "Missing initial state should set MissingState");
+
+            ctx.Check(sm.Reset(), "Reset() should succeed after failed Start()");
+            ctx.Check(sm.SetInitial("A"), "SetInitial() should be allowed after Reset()");
+            ctx.Check(sm.GetInitial() == "A", "Configured initial should be A");
+            ctx.Check(sm.HasInitial(), "HasInitial() should be true after SetInitial()");
+
+            sm.EnableLogging(true);
+            sm.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
+            ctx.Check(sm.GetEventPolicy() == EventPolicy::QueueWhileTransitioning, "SetEventPolicy() should store the selected policy");
+            ctx.Check(sm.GetLastError() == StateMachineError::None, "SetEventPolicy() should clear the last error");
+
+            ctx.Check(sm.AddState({"B", {}, {}}), "State B should be added");
+            ctx.Check(sm.AddTransition({"go", "A", "B"}), "Transition should be added");
+            ctx.Check(sm.Start(), "Start() should succeed with valid configuration");
+            ctx.Check(sm.TriggerEvent("go"), "Valid event should be accepted");
+            ctx.Check(sm.GetCurrent() == "B", "Current should be B after valid event");
         });
     });
 
