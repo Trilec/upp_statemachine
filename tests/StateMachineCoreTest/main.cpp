@@ -4239,7 +4239,38 @@ CONSOLE_APP_MAIN
             ctx.Check(sm.GetCurrent().IsEmpty(), "Failed startup should clear current");
             ctx.Check(sm.GetHistoryCount() == 0, "Failed startup should leave no history");
             ctx.Check(sm.GetLastError() == StateMachineError::StartEnterFailed, "Failed startup should keep StartEnterFailed");
-            ctx.Check(sm.GetQueuedEventCount() == 1, "Failed startup should not drain queued events");
+            ctx.Check(sm.GetQueuedEventCount() == 0, "Failed startup should clear queued events");
+        });
+
+        add("Later successful Start does not drain stale event from failed startup", [](TestContext& ctx) {
+            Function<void(bool)> fail_start;
+            Function<void(bool)> succeed_start;
+            StateMachine sm;
+            sm.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
+            sm.SetInitial("A");
+            bool first_attempt = true;
+            sm.AddState({"A", [&](StateMachine&, Function<void(bool)> done) {
+                if (first_attempt)
+                    fail_start = pick(done);
+                else
+                    succeed_start = pick(done);
+            }, {}});
+            sm.AddState({"B", [](auto&, auto done) { done(true); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+
+            ctx.Check(sm.Start(), "First Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "Event should queue during the failed startup attempt");
+            fail_start(false);
+            ctx.Check(sm.GetQueuedEventCount() == 0, "Failed startup should clear the queued event");
+            ctx.Check(sm.GetLastError() == StateMachineError::StartEnterFailed, "Failed startup should keep StartEnterFailed");
+
+            first_attempt = false;
+            ctx.Check(sm.Start(), "Second Start() should return true");
+            succeed_start(true);
+            ctx.Check(sm.GetCurrent() == "A", "Successful restart should not drain any stale queued event");
+            ctx.Check(sm.GetHistoryCount() == 1, "Successful restart should contain only the __start record");
+            ctx.Check(sm.GetHistoryEvent(0) == "__start", "Successful restart should only record __start");
+            ctx.Check(sm.GetQueuedEventCount() == 0, "No stale queued events should remain after successful restart");
         });
     });
 

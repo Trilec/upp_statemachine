@@ -247,6 +247,7 @@ bool StateMachine::Start() {
         started = false;
         current.Clear();
         transitionHistory.Clear();
+        queued_events.Clear();
         last_error = StateMachineError::StartEnterFailed;
     };
 
