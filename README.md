@@ -63,9 +63,16 @@ upp_statemachine/
 - Transition cancellation is not implemented.
 - `true` usually means the operation was accepted or began, not that async work has finished.
 
-## Minimal Example
+## Quickstart
 
 ```cpp
+#include <Core/Core.h>
+#include <statemachine/statemachine.h>
+
+using namespace Upp;
+
+CONSOLE_APP_MAIN
+{
 StateMachine sm;
 
 if(!sm.AddState({"Idle", {}, {}}))
@@ -76,11 +83,20 @@ if(!sm.SetInitial("Idle"))
 
 if(!sm.Start())
     LOG(sm.GetLastErrorText());
+
+}
 ```
 
 ## Async Example
 
 ```cpp
+#include <Core/Core.h>
+#include <statemachine/statemachine.h>
+
+using namespace Upp;
+
+CONSOLE_APP_MAIN
+{
 StateMachine sm;
 
 if(!sm.AddState({"Idle", {}, {}}))
@@ -101,7 +117,12 @@ if(!sm.Start())
     LOG(sm.GetLastErrorText());
 if(!sm.TriggerEvent("start"))
     LOG(sm.GetLastErrorText());
+
+}
 ```
+
+`true` means the operation was accepted or began. It does not imply that any
+async `OnEnter` or `OnExit` work has already finished.
 
 ## License
 

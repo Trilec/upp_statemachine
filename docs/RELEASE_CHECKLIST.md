@@ -8,6 +8,7 @@
 - [ ] Confirm README include path works
 - [ ] Confirm `docs/API.md` matches public header
 - [ ] Confirm `CHANGELOG.md` updated
+- [ ] Confirm release notes reflect the accepted `189/189` core-test baseline
 - [ ] Confirm no TODO claims implemented features that are not implemented
 - [ ] Confirm queueing docs match the bounded FIFO `TriggerEvent()`-only implementation
 - [ ] Confirm transition cancellation is not documented as implemented

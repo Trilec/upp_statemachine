@@ -1,21 +1,25 @@
 # Changelog
 
-## Unreleased
+## v0.1.0
+
+Initial compact U++ state machine release.
 
 ### Changed
 
 - Reorganized repository into separate library, examples, tests, and docs areas.
 - Moved reusable U++ package into `statemachine/`.
 - Moved GUI test harness into `examples/StateMachineGuiTest/`.
-- Documented event policy as reject/drop implemented, queue declared but not yet implemented.
+- Finalized `EventPolicy` behavior for reject, drop, and bounded FIFO queued `TriggerEvent()` names while transitioning.
 - Hardened `Start()`, `TriggerEvent()`, and `TryTransition()` return values and state checks.
 - Committed transition history before `WhenTransitionFinished` and `OnAfter` so completion callbacks observe the finalized transition.
 - Added lightweight error reporting via `GetLastError()` and `GetLastErrorText()`.
 - Made `GoBack()` return `bool`.
 - Added `Reset()` for runtime-only reset and `Clear()` for full teardown.
 - Added read-only query helpers for states, transitions, and counts.
+- Added queued-event inspection and control helpers.
 - Locked down callback ordering for successful transitions.
 - Treat initial `OnEnter` as part of startup transition handling.
+- Cleared queued events on failed async startup while preserving `StartEnterFailed` rollback behavior.
 - Keep `OnAfter` bound to the exact transition object.
 - Replaced ASSERT-only console tests with a reporting command-line test runner.
 - Made `AddState()` and `AddTransition()` validated `bool` APIs.
@@ -30,6 +34,7 @@
 - Added callback-phase state snapshot coverage for transition lifecycle callbacks.
 - Added deterministic reporting test runner output.
 - Added grouped startup, transition, failure, callback ordering, async, history, and stress tests.
+- Added bounded queue-policy coverage, including startup and `GoBack()` queue ordering cases.
 - Added pasteable PASS/FAILED console output for review.
 - Added minimal history inspection APIs for tests and diagnostics.
 - Added configuration tests for state/transition validation and logging flags.
@@ -38,9 +43,17 @@
 - Added `Reset()` and `Clear()` lifecycle coverage.
 - Added query-helper coverage for existence checks and count tracking.
 
+### Verified
+
+- `StateMachineCoreTest` is green at `189/189`.
+- `StateMachineGuiTest` builds successfully.
+- `statemachine/statemachine.upp` depends only on `Core`.
+
 ### Fixed
 
 - Updated README paths and include examples.
 - Fixed stale license wording.
 - Fixed `OnAfter` lookup to use the exact transition object.
 - Fixed `TriggerEvent()` to reject invalid registered transitions before returning success.
+- Fixed queue draining after successful async `Start()`.
+- Fixed queue draining after successful `GoBack()` so history pop completes first.
