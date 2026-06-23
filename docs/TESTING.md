@@ -47,5 +47,6 @@ ALL TESTS PASSED
 - `TryTransition()` is tested with the current-state check.
 - `OnAfter` is tested against the exact transition object.
 - Logging is expected to stay quiet by default in the console suite.
-- Event queueing and transition cancellation remain unimplemented and should not be tested as existing behavior.
+- The console suite covers bounded FIFO `QueueWhileTransitioning` behavior for queued `TriggerEvent()` calls.
+- Transition cancellation remains unimplemented and should not be tested as existing behavior.
 - Boolean-returning API calls should be read as "accepted/began" unless the docs say otherwise.

@@ -54,10 +54,11 @@ namespace Upp {
 		BackTransitionFailed,
 		EventRejectedWhileTransitioning,
 		EventDroppedWhileTransitioning,
+		EventQueueFull,
 		EventQueueingNotImplemented,
 	};
 
-	// Stored policy only for now; queueing behavior is deferred.
+	// Only TriggerEvent() participates in queueing under QueueWhileTransitioning.
 	enum class EventPolicy {
 		RejectWhileTransitioning,
 		DropWhileTransitioning,
@@ -166,6 +167,15 @@ namespace Upp {
 
 	    /// Get the stored event policy
 	    EventPolicy GetEventPolicy() const { return event_policy; }
+
+	    /// Configure the bounded queued-event capacity used by QueueWhileTransitioning.
+	    void SetMaxQueuedEvents(int n);
+	    int GetMaxQueuedEvents() const { return max_queued_events; }
+
+	    /// Queue inspection and control for pending event names.
+	    int GetQueuedEventCount() const { return queued_events.GetCount(); }
+	    bool HasQueuedEvents() const { return !queued_events.IsEmpty(); }
+	    void ClearQueuedEvents() { queued_events.Clear(); ClearError(); }
 	
 	    /// Get current state ID
 	    String GetCurrent() const                { return current; }
@@ -225,6 +235,8 @@ namespace Upp {
 	    bool DoTransition(const Transition& t,
 	                      bool record = true,
 	                      Function<void(bool)> on_done = {});
+	    bool QueueEvent(const String& e);
+	    void DrainQueuedEvents();
 	
 	    void Finalize(const TransitionContext& ctx, bool record);
 	
@@ -237,7 +249,10 @@ namespace Upp {
 	    bool   started = false;
 	    bool   transitioning = false;
 	    bool   logging = false;
+	    bool   processing_queue = false;
 	    EventPolicy event_policy = EventPolicy::RejectWhileTransitioning;
+	    Vector<String> queued_events;
+	    int max_queued_events = 64;
 	    StateMachineError last_error = StateMachineError::None;
 	};
 

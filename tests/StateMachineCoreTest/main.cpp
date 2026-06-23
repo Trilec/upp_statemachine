@@ -91,6 +91,7 @@ struct InvariantExpectation {
     bool started = false;
     bool transitioning = false;
     int history = 0;
+    int queued = -1;
     int states = -1;
     int transitions = -1;
     bool can_go_back = false;
@@ -107,6 +108,8 @@ static void CheckInvariants(TestContext& ctx, const StateMachine& sm, const Inva
     ctx.Check(sm.IsStarted() == e.started, label + ": started mismatch");
     ctx.Check(sm.IsTransitioning() == e.transitioning, label + ": transitioning mismatch");
     ctx.Check(sm.GetHistoryCount() == e.history, label + ": history count mismatch");
+    if (e.queued >= 0)
+        ctx.Check(sm.GetQueuedEventCount() == e.queued, label + ": queued count mismatch");
     ctx.Check(sm.GetHistoryCount() >= 0, label + ": history count should never be negative");
     if (e.states >= 0)
         ctx.Check(sm.GetStateCount() == e.states, label + ": state count mismatch");
@@ -329,7 +332,7 @@ CONSOLE_APP_MAIN
             ctx.Check(sm.GetEventPolicy() == EventPolicy::QueueWhileTransitioning, "Stored event policy should be QueueWhileTransitioning");
         });
 
-        add("QueueWhileTransitioning currently rejects until implemented", [](TestContext& ctx) {
+        add("QueueWhileTransitioning stores the policy", [](TestContext& ctx) {
             Function<void(bool)> finish_exit;
 
             StateMachine sm;
@@ -342,8 +345,9 @@ CONSOLE_APP_MAIN
             ctx.Check(sm.AddTransition({"go", "A", "B"}), "Transition should be added");
             ctx.Check(sm.Start(), "Start() should return true");
             ctx.Check(sm.TriggerEvent("go"), "TriggerEvent() should begin");
-            ctx.Check(!sm.TriggerEvent("go"), "TriggerEvent() should still reject while transitioning");
-            ctx.Check(sm.GetLastError() == StateMachineError::EventQueueingNotImplemented, "Last error should be EventQueueingNotImplemented");
+            ctx.Check(sm.TriggerEvent("go"), "TriggerEvent() should queue while transitioning");
+            ctx.Check(sm.GetQueuedEventCount() == 1, "QueueWhileTransitioning should queue one event");
+            ctx.Check(sm.GetLastError() == StateMachineError::None, "Queued event should clear the last error");
             finish_exit(true);
         });
 
@@ -3125,6 +3129,539 @@ CONSOLE_APP_MAIN
             finish_enter(false);
 
             ctx.Check(finished_count == 1, "WhenTransitionFinished should be called once after double done()");
+        });
+    });
+
+    RunGroup("Queue policy", passed, failed, [&](auto add) {
+        add("QueueWhileTransitioning enqueues TriggerEvent during async transition", [](TestContext& ctx) {
+            Function<void(bool)> finish_exit;
+            StateMachine sm;
+            sm.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto done) { done(true); }, [&](StateMachine&, Function<void(bool)> done) { finish_exit = pick(done); }});
+            sm.AddState({"B", [](auto&, auto done) { done(true); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "A->B should begin");
+            ctx.Check(sm.TriggerEvent("go"), "TriggerEvent() should queue while transitioning");
+            InvariantExpectation e;
+            e.current = "A";
+            e.started = true;
+            e.transitioning = true;
+            e.history = 1;
+            e.queued = 1;
+            e.can_go_back = false;
+            e.check_last_error = true;
+            e.last_error = StateMachineError::None;
+            CheckInvariants(ctx, sm, e, "Queued during async transition");
+            finish_exit(true);
+            ctx.Check(sm.GetQueuedEventCount() == 0, "Queued event should be consumed after processing");
+            ctx.Check(sm.GetLastError() == StateMachineError::NoMatchingTransition, "Queued same-state event should fail after state changes");
+        });
+
+        add("Queued event runs after active transition succeeds", [](TestContext& ctx) {
+            Function<void(bool)> finish_exit;
+            StateMachine sm;
+            int enter_c = 0;
+            sm.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto done) { done(true); }, [&](StateMachine&, Function<void(bool)> done) { finish_exit = pick(done); }});
+            sm.AddState({"B", [](auto&, auto done) { done(true); }, {}});
+            sm.AddState({"C", [&](auto&, auto done) { ++enter_c; done(true); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+            sm.AddTransition({"next", "B", "C"});
+
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "A->B should begin");
+            ctx.Check(sm.TriggerEvent("next"), "B->C should queue");
+            ctx.Check(sm.GetCurrent() == "A", "Queued event should not run early");
+            finish_exit(true);
+            ctx.Check(sm.GetCurrent() == "C", "Queued event should run after success");
+            ctx.Check(enter_c == 1, "Queued event should enter C once");
+        });
+
+        add("Queued event does not run before WhenTransitionFinished or OnAfter", [](TestContext& ctx) {
+            Function<void(bool)> finish_exit;
+            StateMachine sm;
+            bool finished_seen_queue = false;
+            bool after_seen_queue = false;
+            sm.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto done) { done(true); }, [&](StateMachine&, Function<void(bool)> done) { finish_exit = pick(done); }});
+            sm.AddState({"B", [](auto&, auto done) { done(true); }, {}});
+            sm.AddState({"C", [](auto&, auto done) { done(true); }, {}});
+            sm.WhenTransitionFinished = [&](const TransitionContext& t) {
+                if (t.event == "go")
+                    finished_seen_queue = sm.GetQueuedEventCount() == 1 && sm.GetCurrent() == "B";
+            };
+            Transition go{"go", "A", "B"};
+            go.OnAfter = [&](const TransitionContext&) {
+                after_seen_queue = sm.GetQueuedEventCount() == 1 && sm.GetCurrent() == "B";
+            };
+            sm.AddTransition(go);
+            sm.AddTransition({"next", "B", "C"});
+
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "A->B should begin");
+            ctx.Check(sm.TriggerEvent("next"), "B->C should queue");
+            finish_exit(true);
+            ctx.Check(finished_seen_queue, "Queue should still be pending during WhenTransitionFinished");
+            ctx.Check(after_seen_queue, "Queue should still be pending during OnAfter");
+        });
+
+        add("Queued event runs only after IsTransitioning becomes false for the previous transition", [](TestContext& ctx) {
+            Function<void(bool)> finish_exit;
+            StateMachine sm;
+            bool queued_started_from_committed_state = false;
+            sm.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto done) { done(true); }, [&](StateMachine&, Function<void(bool)> done) { finish_exit = pick(done); }});
+            sm.AddState({"B", [](auto&, auto done) { done(true); }, {}});
+            sm.AddState({"C", [&](auto&, auto done) { queued_started_from_committed_state = sm.GetCurrent() == "B"; done(true); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+            sm.AddTransition({"next", "B", "C"});
+
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "A->B should begin");
+            ctx.Check(sm.TriggerEvent("next"), "B->C should queue");
+            finish_exit(true);
+            ctx.Check(queued_started_from_committed_state, "Queued transition should start only after the previous transition commits B");
+        });
+
+        add("FIFO order is preserved", [](TestContext& ctx) {
+            Function<void(bool)> finish_exit;
+            StateMachine sm;
+            Vector<String> order;
+            sm.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto done) { done(true); }, [&](StateMachine&, Function<void(bool)> done) { finish_exit = pick(done); }});
+            sm.AddState({"B", [](auto&, auto done) { done(true); }, {}});
+            sm.AddState({"C", [&](auto&, auto done) { order.Add("C"); done(true); }, {}});
+            sm.AddState({"D", [&](auto&, auto done) { order.Add("D"); done(true); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+            sm.AddTransition({"to_c", "B", "C"});
+            sm.AddTransition({"to_d", "C", "D"});
+
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "A->B should begin");
+            ctx.Check(sm.TriggerEvent("to_c"), "to_c should queue first");
+            ctx.Check(sm.TriggerEvent("to_d"), "to_d should queue second");
+            finish_exit(true);
+            Vector<String> expected;
+            expected.Add("C");
+            expected.Add("D");
+            ctx.Check(SameOrder(order, expected), "Queued events should run in FIFO order");
+        });
+
+        add("Multiple queued events process in order", [](TestContext& ctx) {
+            Function<void(bool)> finish_exit;
+            StateMachine sm;
+            Vector<String> order;
+            sm.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto done) { done(true); }, [&](StateMachine&, Function<void(bool)> done) { finish_exit = pick(done); }});
+            sm.AddState({"B", [&](auto&, auto done) { order.Add("B"); done(true); }, {}});
+            sm.AddState({"C", [&](auto&, auto done) { order.Add("C"); done(true); }, {}});
+            sm.AddState({"D", [&](auto&, auto done) { order.Add("D"); done(true); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+            sm.AddTransition({"to_c", "B", "C"});
+            sm.AddTransition({"to_d", "C", "D"});
+
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "A->B should begin");
+            ctx.Check(sm.TriggerEvent("to_c"), "to_c should queue");
+            ctx.Check(sm.TriggerEvent("to_d"), "to_d should queue");
+            finish_exit(true);
+            Vector<String> expected;
+            expected.Add("B");
+            expected.Add("C");
+            expected.Add("D");
+            ctx.Check(SameOrder(order, expected), "Initial success and queued transitions should complete in order");
+        });
+
+        add("Events queued during queued-event processing append to the back", [](TestContext& ctx) {
+            Function<void(bool)> finish_exit;
+            StateMachine sm;
+            Vector<String> order;
+            sm.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto done) { done(true); }, [&](StateMachine&, Function<void(bool)> done) { finish_exit = pick(done); }});
+            sm.AddState({"B", [&](auto&, auto done) { order.Add("B"); done(true); }, {}});
+            sm.AddState({"C", [&](auto&, auto done) { order.Add("C"); done(true); }, {}});
+            sm.AddState({"D", [&](auto&, auto done) { order.Add("D"); done(true); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+            Transition to_c{"to_c", "B", "C"};
+            to_c.OnAfter = [&](const TransitionContext&) {
+                order.Add("after_c");
+                ctx.Check(sm.TriggerEvent("to_d"), "OnAfter should be able to queue another event while transitioning");
+            };
+            sm.AddTransition(to_c);
+            sm.AddTransition({"to_d", "C", "D"});
+
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "A->B should begin");
+            ctx.Check(sm.TriggerEvent("to_c"), "to_c should queue");
+            finish_exit(true);
+            Vector<String> expected;
+            expected.Add("B");
+            expected.Add("C");
+            expected.Add("after_c");
+            expected.Add("D");
+            ctx.Check(SameOrder(order, expected), "Event queued from OnAfter should append and run later");
+        });
+
+        add("Queue drain is non-recursive", [](TestContext& ctx) {
+            Function<void(bool)> finish_exit;
+            StateMachine sm;
+            int after_depth = 0;
+            int max_after_depth = 0;
+            sm.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto done) { done(true); }, [&](StateMachine&, Function<void(bool)> done) { finish_exit = pick(done); }});
+            sm.AddState({"B", [](auto&, auto done) { done(true); }, {}});
+            sm.AddState({"C", [](auto&, auto done) { done(true); }, {}});
+            sm.AddState({"D", [](auto&, auto done) { done(true); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+            Transition to_c{"to_c", "B", "C"};
+            to_c.OnAfter = [&](const TransitionContext&) {
+                ++after_depth;
+                if (after_depth > max_after_depth)
+                    max_after_depth = after_depth;
+                ctx.Check(sm.TriggerEvent("to_d"), "OnAfter should queue to_d");
+                --after_depth;
+            };
+            sm.AddTransition(to_c);
+            sm.AddTransition({"to_d", "C", "D"});
+
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "A->B should begin");
+            ctx.Check(sm.TriggerEvent("to_c"), "to_c should queue");
+            finish_exit(true);
+            ctx.Check(max_after_depth == 1, "Queued drain should not re-enter transition callbacks recursively");
+        });
+
+        add("Active transition failure does not drain queue", [](TestContext& ctx) {
+            Function<void(bool)> finish_exit;
+            StateMachine sm;
+            sm.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto done) { done(true); }, [&](StateMachine&, Function<void(bool)> done) { finish_exit = pick(done); }});
+            sm.AddState({"B", [](auto&, auto done) { done(true); }, {}});
+            sm.AddState({"C", [](auto&, auto done) { done(true); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+            sm.AddTransition({"next", "B", "C"});
+
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "A->B should begin");
+            ctx.Check(sm.TriggerEvent("next"), "next should queue");
+            finish_exit(false);
+            InvariantExpectation e;
+            e.current = "A";
+            e.started = true;
+            e.transitioning = false;
+            e.history = 1;
+            e.queued = 1;
+            e.can_go_back = false;
+            e.check_last_error = true;
+            e.last_error = StateMachineError::ExitFailed;
+            CheckInvariants(ctx, sm, e, "Failed active transition");
+        });
+
+        add("Failed queued event is removed sets last_error and stops queue drain", [](TestContext& ctx) {
+            Function<void(bool)> finish_exit;
+            StateMachine sm;
+            sm.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto done) { done(true); }, [&](StateMachine&, Function<void(bool)> done) { finish_exit = pick(done); }});
+            sm.AddState({"B", [](auto&, auto done) { done(true); }, {}});
+            sm.AddState({"C", [&](auto&, auto done) { done(false); }, {}});
+            sm.AddState({"D", [](auto&, auto done) { done(true); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+            sm.AddTransition({"to_c", "B", "C"});
+            sm.AddTransition({"to_d", "B", "D"});
+
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "A->B should begin");
+            ctx.Check(sm.TriggerEvent("to_c"), "to_c should queue");
+            ctx.Check(sm.TriggerEvent("to_d"), "to_d should queue");
+            finish_exit(true);
+            ctx.Check(sm.GetCurrent() == "B", "Failed queued event should leave current state at B");
+            ctx.Check(sm.GetLastError() == StateMachineError::EnterFailed, "Failed queued event should set EnterFailed");
+            ctx.Check(sm.GetQueuedEventCount() == 1, "Failed queued event should be removed and stop the drain");
+        });
+
+        add("Remaining queued events stay queued after a queued-event failure", [](TestContext& ctx) {
+            Function<void(bool)> finish_exit;
+            StateMachine sm;
+            sm.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto done) { done(true); }, [&](StateMachine&, Function<void(bool)> done) { finish_exit = pick(done); }});
+            sm.AddState({"B", [](auto&, auto done) { done(true); }, {}});
+            sm.AddState({"C", [&](auto&, auto done) { done(false); }, {}});
+            sm.AddState({"D", [](auto&, auto done) { done(true); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+            sm.AddTransition({"missing", "B", "C"});
+            sm.AddTransition({"to_d", "B", "D"});
+
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "A->B should begin");
+            ctx.Check(sm.TriggerEvent("missing"), "First queued event should queue");
+            ctx.Check(sm.TriggerEvent("to_d"), "Second queued event should queue");
+            finish_exit(true);
+            ctx.Check(sm.HasQueuedEvents(), "Later queued events should remain queued after failure");
+            ctx.Check(sm.GetQueuedEventCount() == 1, "Exactly one queued event should remain");
+            ctx.Check(sm.TriggerEvent("to_d"), "Remaining queued event should still be runnable manually once idle");
+            ctx.Check(sm.GetCurrent() == "D", "Manual run should still succeed from B");
+        });
+
+        add("Reset clears queued events", [](TestContext& ctx) {
+            Function<void(bool)> finish_exit;
+            StateMachine sm;
+            sm.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto done) { done(true); }, [&](StateMachine&, Function<void(bool)> done) { finish_exit = pick(done); }});
+            sm.AddState({"B", [](auto&, auto done) { done(true); }, {}});
+            sm.AddState({"C", [](auto&, auto done) { done(true); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+            sm.AddTransition({"next", "B", "C"});
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "A->B should begin");
+            ctx.Check(sm.TriggerEvent("next"), "next should queue");
+            finish_exit(false);
+            ctx.Check(sm.Reset(), "Reset() should be allowed while idle");
+            ctx.Check(!sm.HasQueuedEvents(), "Reset() should clear queued events");
+        });
+
+        add("Clear clears queued events", [](TestContext& ctx) {
+            Function<void(bool)> finish_exit;
+            StateMachine sm;
+            sm.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto done) { done(true); }, [&](StateMachine&, Function<void(bool)> done) { finish_exit = pick(done); }});
+            sm.AddState({"B", [](auto&, auto done) { done(true); }, {}});
+            sm.AddState({"C", [](auto&, auto done) { done(true); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+            sm.AddTransition({"next", "B", "C"});
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "A->B should begin");
+            ctx.Check(sm.TriggerEvent("next"), "next should queue");
+            finish_exit(false);
+            ctx.Check(sm.Clear(), "Clear() should be allowed while idle");
+            ctx.Check(!sm.HasQueuedEvents(), "Clear() should clear queued events");
+        });
+
+        add("ClearQueuedEvents clears queued events", [](TestContext& ctx) {
+            Function<void(bool)> finish_exit;
+            StateMachine sm;
+            sm.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto done) { done(true); }, [&](StateMachine&, Function<void(bool)> done) { finish_exit = pick(done); }});
+            sm.AddState({"B", [](auto&, auto done) { done(true); }, {}});
+            sm.AddState({"C", [](auto&, auto done) { done(true); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+            sm.AddTransition({"next", "B", "C"});
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "A->B should begin");
+            ctx.Check(sm.TriggerEvent("next"), "next should queue");
+            ctx.Check(sm.HasQueuedEvents(), "Queue should contain a pending event");
+            sm.ClearQueuedEvents();
+            ctx.Check(!sm.HasQueuedEvents(), "ClearQueuedEvents() should empty the queue");
+            finish_exit(true);
+            ctx.Check(sm.GetCurrent() == "B", "Cleared queued events should not later run");
+        });
+
+        add("Queue full returns false and sets EventQueueFull", [](TestContext& ctx) {
+            Function<void(bool)> finish_exit;
+            StateMachine sm;
+            sm.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
+            sm.SetMaxQueuedEvents(1);
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto done) { done(true); }, [&](StateMachine&, Function<void(bool)> done) { finish_exit = pick(done); }});
+            sm.AddState({"B", [](auto&, auto done) { done(true); }, {}});
+            sm.AddState({"C", [](auto&, auto done) { done(true); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+            sm.AddTransition({"next", "B", "C"});
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "A->B should begin");
+            ctx.Check(sm.TriggerEvent("next"), "First queued event should fit");
+            ctx.Check(!sm.TriggerEvent("next"), "Second queued event should be rejected when full");
+            ctx.Check(sm.GetLastError() == StateMachineError::EventQueueFull, "Full queue should set EventQueueFull");
+            finish_exit(true);
+        });
+
+        add("Max queue size 0 rejects all queued events", [](TestContext& ctx) {
+            Function<void(bool)> finish_exit;
+            StateMachine sm;
+            sm.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
+            sm.SetMaxQueuedEvents(-5);
+            ctx.Check(sm.GetMaxQueuedEvents() == 0, "Negative queue size should clamp to zero");
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto done) { done(true); }, [&](StateMachine&, Function<void(bool)> done) { finish_exit = pick(done); }});
+            sm.AddState({"B", [](auto&, auto done) { done(true); }, {}});
+            sm.AddState({"C", [](auto&, auto done) { done(true); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+            sm.AddTransition({"next", "B", "C"});
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "A->B should begin");
+            ctx.Check(!sm.TriggerEvent("next"), "Queue size zero should reject queued events");
+            ctx.Check(sm.GetLastError() == StateMachineError::EventQueueFull, "Queue size zero should report EventQueueFull");
+            finish_exit(true);
+        });
+
+        add("TryTransition while transitioning still returns false and does not queue", [](TestContext& ctx) {
+            Function<void(bool)> finish_exit;
+            StateMachine sm;
+            sm.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto done) { done(true); }, [&](StateMachine&, Function<void(bool)> done) { finish_exit = pick(done); }});
+            sm.AddState({"B", [](auto&, auto done) { done(true); }, {}});
+            sm.AddState({"C", [](auto&, auto done) { done(true); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+            sm.AddTransition({"next", "B", "C"});
+            Transition direct{"next", "B", "C"};
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "A->B should begin");
+            ctx.Check(!sm.TryTransition(direct), "TryTransition() should still reject while transitioning");
+            ctx.Check(sm.GetLastError() == StateMachineError::TransitionInProgress, "TryTransition() should report TransitionInProgress");
+            ctx.Check(sm.GetQueuedEventCount() == 0, "TryTransition() should not queue anything");
+            finish_exit(true);
+        });
+
+        add("GoBack while transitioning still returns false and does not queue", [](TestContext& ctx) {
+            Function<void(bool)> finish_exit;
+            StateMachine sm;
+            sm.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto done) { done(true); }, [&](StateMachine&, Function<void(bool)> done) { finish_exit = pick(done); }});
+            sm.AddState({"B", [](auto&, auto done) { done(true); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "A->B should begin");
+            ctx.Check(!sm.GoBack(), "GoBack() should still reject while transitioning");
+            ctx.Check(sm.GetLastError() == StateMachineError::TransitionInProgress, "GoBack() should report TransitionInProgress");
+            ctx.Check(sm.GetQueuedEventCount() == 0, "GoBack() should not queue anything");
+            finish_exit(true);
+        });
+
+        add("RejectWhileTransitioning behavior is unchanged", [](TestContext& ctx) {
+            Function<void(bool)> finish_exit;
+            StateMachine sm;
+            sm.SetEventPolicy(EventPolicy::RejectWhileTransitioning);
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto done) { done(true); }, [&](StateMachine&, Function<void(bool)> done) { finish_exit = pick(done); }});
+            sm.AddState({"B", [](auto&, auto done) { done(true); }, {}});
+            sm.AddState({"C", [](auto&, auto done) { done(true); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+            sm.AddTransition({"next", "B", "C"});
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "A->B should begin");
+            ctx.Check(!sm.TriggerEvent("next"), "Reject policy should still reject queued event attempts");
+            ctx.Check(sm.GetLastError() == StateMachineError::EventRejectedWhileTransitioning, "Reject policy should remain unchanged");
+            ctx.Check(sm.GetQueuedEventCount() == 0, "Reject policy should not queue");
+            finish_exit(true);
+        });
+
+        add("DropWhileTransitioning behavior is unchanged", [](TestContext& ctx) {
+            Function<void(bool)> finish_exit;
+            StateMachine sm;
+            sm.SetEventPolicy(EventPolicy::DropWhileTransitioning);
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto done) { done(true); }, [&](StateMachine&, Function<void(bool)> done) { finish_exit = pick(done); }});
+            sm.AddState({"B", [](auto&, auto done) { done(true); }, {}});
+            sm.AddState({"C", [](auto&, auto done) { done(true); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+            sm.AddTransition({"next", "B", "C"});
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "A->B should begin");
+            ctx.Check(!sm.TriggerEvent("next"), "Drop policy should still drop queued event attempts");
+            ctx.Check(sm.GetLastError() == StateMachineError::EventDroppedWhileTransitioning, "Drop policy should remain unchanged");
+            ctx.Check(sm.GetQueuedEventCount() == 0, "Drop policy should not queue");
+            finish_exit(true);
+        });
+
+        add("Queued event with no matching transition fails and stops drain", [](TestContext& ctx) {
+            Function<void(bool)> finish_exit;
+            StateMachine sm;
+            sm.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto done) { done(true); }, [&](StateMachine&, Function<void(bool)> done) { finish_exit = pick(done); }});
+            sm.AddState({"B", [](auto&, auto done) { done(true); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "A->B should begin");
+            ctx.Check(sm.TriggerEvent("missing"), "Missing event name should still queue while transitioning");
+            finish_exit(true);
+            ctx.Check(sm.GetCurrent() == "B", "Successful active transition should still commit");
+            ctx.Check(sm.GetLastError() == StateMachineError::NoMatchingTransition, "Missing queued transition should set NoMatchingTransition");
+            ctx.Check(sm.GetQueuedEventCount() == 0, "Failed popped event should be removed");
+        });
+
+        add("Queued async transition pauses drain and resumes after success", [](TestContext& ctx) {
+            Function<void(bool)> finish_exit;
+            Function<void(bool)> finish_enter_c;
+            StateMachine sm;
+            sm.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto done) { done(true); }, [&](StateMachine&, Function<void(bool)> done) { finish_exit = pick(done); }});
+            sm.AddState({"B", [](auto&, auto done) { done(true); }, {}});
+            sm.AddState({"C", [&](StateMachine&, Function<void(bool)> done) { finish_enter_c = pick(done); }, {}});
+            sm.AddState({"D", [](auto&, auto done) { done(true); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+            sm.AddTransition({"to_c", "B", "C"});
+            sm.AddTransition({"to_d", "C", "D"});
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "A->B should begin");
+            ctx.Check(sm.TriggerEvent("to_c"), "to_c should queue");
+            ctx.Check(sm.TriggerEvent("to_d"), "to_d should queue");
+            finish_exit(true);
+            ctx.Check(sm.IsTransitioning(), "Queued async transition should pause drain while active");
+            ctx.Check(sm.GetQueuedEventCount() == 1, "Later queued events should remain queued until async completion");
+            finish_enter_c(true);
+            ctx.Check(sm.GetCurrent() == "D", "Drain should resume after queued async success");
+            ctx.Check(sm.GetQueuedEventCount() == 0, "Queue should be empty after resumed drain");
+        });
+
+        add("Queued events survive policy changes and new policy affects only future calls", [](TestContext& ctx) {
+            Function<void(bool)> finish_exit;
+            StateMachine sm;
+            sm.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto done) { done(true); }, [&](StateMachine&, Function<void(bool)> done) { finish_exit = pick(done); }});
+            sm.AddState({"B", [](auto&, auto done) { done(true); }, {}});
+            sm.AddState({"C", [](auto&, auto done) { done(true); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+            sm.AddTransition({"next", "B", "C"});
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "A->B should begin");
+            ctx.Check(sm.TriggerEvent("next"), "First event should queue under queue policy");
+            sm.SetEventPolicy(EventPolicy::RejectWhileTransitioning);
+            ctx.Check(!sm.TriggerEvent("next"), "Future events should follow the new reject policy");
+            ctx.Check(sm.GetQueuedEventCount() == 1, "Existing queued events should remain queued");
+            finish_exit(true);
+            ctx.Check(sm.GetCurrent() == "C", "Existing queued event should still drain after success");
+        });
+
+        add("SetMaxQueuedEvents trims newest queued events from the back", [](TestContext& ctx) {
+            Function<void(bool)> finish_exit;
+            StateMachine sm;
+            sm.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto done) { done(true); }, [&](StateMachine&, Function<void(bool)> done) { finish_exit = pick(done); }});
+            sm.AddState({"B", [](auto&, auto done) { done(true); }, {}});
+            sm.AddState({"C", [](auto&, auto done) { done(true); }, {}});
+            sm.AddState({"D", [](auto&, auto done) { done(true); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+            sm.AddTransition({"to_c", "B", "C"});
+            sm.AddTransition({"to_d", "C", "D"});
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "A->B should begin");
+            ctx.Check(sm.TriggerEvent("to_c"), "First event should queue");
+            ctx.Check(sm.TriggerEvent("to_d"), "Second event should queue");
+            sm.SetMaxQueuedEvents(1);
+            ctx.Check(sm.GetQueuedEventCount() == 1, "Queue should trim to the new limit");
+            finish_exit(true);
+            ctx.Check(sm.GetCurrent() == "C", "Newest queued event should be trimmed from the back");
         });
     });
 

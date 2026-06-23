@@ -62,6 +62,11 @@ Controls how events are treated while a transition is already in progress.
 - `AddTransition(Transition t) -> bool`
 - `SetEventPolicy(EventPolicy policy)`
 - `GetEventPolicy() const`
+- `SetMaxQueuedEvents(int n)`
+- `GetMaxQueuedEvents() const`
+- `GetQueuedEventCount() const`
+- `HasQueuedEvents() const`
+- `ClearQueuedEvents()`
 
 ### Execution
 
@@ -82,6 +87,7 @@ Relevant transition-time event errors:
 
 - `EventRejectedWhileTransitioning`
 - `EventDroppedWhileTransitioning`
+- `EventQueueFull`
 - `EventQueueingNotImplemented`
 
 ### Logging
@@ -114,7 +120,7 @@ Relevant transition-time event errors:
 `TriggerEvent()` returns `true` when a transition begins and `false` when it
 is ignored or blocked.
 
-1. If the machine is already transitioning, the event is ignored.
+1. If the machine is already transitioning, the stored `EventPolicy` is applied.
 2. If the machine has not been started, the event is ignored.
 3. The machine searches for a transition where:
    - `transition.from == current state`
@@ -132,29 +138,22 @@ is ignored or blocked.
 13. `WhenTransitionFinished` is called.
 14. The transition `OnAfter` callback is called.
 15. The transitioning flag is cleared.
-
-Current implemented behavior:
-
-- `RejectWhileTransitioning`
-- `DropWhileTransitioning`
-
-Declared but not fully implemented:
-
-- `QueueWhileTransitioning`
+16. If the transition succeeded, queued event names are drained in FIFO order.
 
 If `TriggerEvent()` is called while a transition is in progress, the stored
 policy determines the error:
 
 - `RejectWhileTransitioning` -> `EventRejectedWhileTransitioning`
 - `DropWhileTransitioning` -> `EventDroppedWhileTransitioning`
-- `QueueWhileTransitioning` -> `EventQueueingNotImplemented`
+- `QueueWhileTransitioning` -> queue the event name and return `true`
+- `QueueWhileTransitioning` when full -> `EventQueueFull`
 
 When `TriggerEvent()` fails, `GetLastError()` and `GetLastErrorText()` report
 the reason.
 
-`QueueWhileTransitioning` is declared as a policy value, but queue processing
-is not implemented yet. Cancellation and hierarchical states are not
-implemented.
+`QueueWhileTransitioning` is intentionally lightweight: queued `TriggerEvent()`
+names only, bounded FIFO order, no queued `TryTransition()`, no queued
+`GoBack()`, no cancellation, and no hierarchy.
 
 ## Callback order
 

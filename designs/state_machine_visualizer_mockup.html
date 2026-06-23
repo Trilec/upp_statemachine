@@ -1,0 +1,1281 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>State Machine Visualizer & Stress Tester</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#f0f9ff',
+                            100: '#e0f2fe',
+                            500: '#0ea5e9',
+                            600: '#0284c7',
+                            700: '#0369a1',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Custom scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0f172a;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #475569;
+        }
+        .canvas-container {
+            background-image: 
+                radial-gradient(rgba(51, 65, 85, 0.12) 1.5px, transparent 1.5px);
+            background-size: 24px 24px;
+        }
+        @keyframes pulse-slow {
+            0%, 100% { opacity: 0.2; }
+            50% { opacity: 0.35; }
+        }
+        .bg-grid-glow {
+            animation: pulse-slow 8s infinite ease-in-out;
+        }
+    </style>
+</head>
+<body class="bg-[#0b0f19] text-slate-100 min-h-screen flex flex-col font-sans select-none overflow-hidden">
+
+    <!-- Top Navigation Bar -->
+    <header class="border-b border-slate-800/80 bg-[#0d1324]/90 backdrop-blur-md px-6 py-3 flex items-center justify-between z-10 shrink-0">
+        <div class="flex items-center space-x-3">
+            <div class="p-2 bg-emerald-500/10 text-emerald-400 rounded-lg border border-emerald-500/20">
+                <i data-lucide="activity" class="w-5 h-5 animate-pulse"></i>
+            </div>
+            <div>
+                <h1 class="text-base font-bold tracking-tight text-white flex items-center gap-2">
+                    State Machine Resiliency Visualizer
+                </h1>
+                <p class="text-xs text-slate-400">Testing dual-track processing & graceful interruption recovery</p>
+            </div>
+        </div>
+
+        <!-- Master Status Bar (Simplified) -->
+        <div class="flex items-center space-x-6 text-sm">
+            <div>
+                <span class="text-slate-400 text-[10px] uppercase block tracking-wider">Active Tasks</span>
+                <span id="header-active-tokens" class="font-mono text-cyan-400 font-bold text-sm">0</span>
+            </div>
+            <div class="h-5 w-[1px] bg-slate-800"></div>
+            <div>
+                <span class="text-slate-400 text-[10px] uppercase block tracking-wider">Gracefully Processed</span>
+                <span id="header-processed" class="font-mono text-emerald-400 font-bold text-sm font-semibold">0</span>
+            </div>
+            <div class="h-5 w-[1px] bg-slate-800"></div>
+            <!-- Right Sound & Reset triggers -->
+            <div class="flex items-center space-x-2">
+                <button id="sound-btn" class="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700/50 transition" title="Toggle Sound FX">
+                    <i data-lucide="volume-2" class="w-4 h-4"></i>
+                </button>
+                <button id="reset-metrics-btn" class="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700/50 transition" title="Reset All Metrics">
+                    <i data-lucide="rotate-ccw" class="w-4 h-4"></i>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Docked Controls Sub-Header -->
+    <div class="border-b border-slate-800/80 bg-[#090d16]/95 px-6 py-2.5 flex flex-wrap items-center justify-between gap-4 z-10 shadow-lg shrink-0">
+        <div class="flex items-center space-x-3">
+            <button id="play-pause-btn" class="flex items-center justify-center space-x-1.5 py-1.5 px-3.5 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white rounded-lg transition font-medium text-xs">
+                <i data-lucide="pause" class="w-3.5 h-3.5"></i>
+                <span class="btn-text">Running</span>
+            </button>
+            <button id="inject-token-btn" class="flex items-center justify-center space-x-1.5 py-1.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg border border-slate-700/50 transition font-medium text-xs">
+                <i data-lucide="plus-circle" class="w-3.5 h-3.5 text-cyan-400"></i>
+                <span>Inject Event</span>
+            </button>
+            <div class="h-6 w-[1px] bg-slate-800"></div>
+            <button id="trigger-interrupt-btn" class="flex items-center justify-center space-x-1.5 py-1.5 px-3 bg-amber-500/15 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-lg transition font-medium text-xs">
+                <i data-lucide="zap" class="w-3.5 h-3.5 text-amber-400"></i>
+                <span>Inject Manual Interrupt</span>
+            </button>
+        </div>
+
+        <!-- Sliders docked in the secondary row -->
+        <div class="flex items-center space-x-6 text-xs">
+            <!-- Sim speed slider -->
+            <div class="flex items-center space-x-2">
+                <span class="text-slate-400 whitespace-nowrap">Sim Speed:</span>
+                <span id="val-speed" class="font-mono text-brand-400 font-bold w-8">1.0x</span>
+                <input id="slider-speed" type="range" min="0.1" max="3.0" step="0.1" value="1.0" class="w-24 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-brand-500">
+            </div>
+
+            <!-- Injection Rate slider -->
+            <div class="flex items-center space-x-2">
+                <span class="text-slate-400 whitespace-nowrap">Auto Ingest:</span>
+                <span id="val-inject-rate" class="font-mono text-cyan-400 font-bold w-10">4/s</span>
+                <input id="slider-inject-rate" type="range" min="0" max="25" step="1" value="4" class="w-24 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-500">
+            </div>
+
+            <!-- Auto Interrupt Risk probability slider -->
+            <div class="flex items-center space-x-2">
+                <span class="text-slate-400 whitespace-nowrap">Interrupt Risk:</span>
+                <span id="val-interrupt-prob" class="font-mono text-amber-400 font-bold w-10">10%</span>
+                <input id="slider-interrupt-prob" type="range" min="0" max="60" step="5" value="10" class="w-24 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-500">
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Workspace (Fully open and clean) -->
+    <div class="flex-1 flex overflow-hidden relative">
+        
+        <!-- Interactive Canvas Visualizer -->
+        <main class="flex-1 flex flex-col relative overflow-hidden bg-[#070b13]">
+            <!-- Decorative Subtle Ambient Glow -->
+            <div class="absolute inset-0 bg-grid-glow pointer-events-none overflow-hidden">
+                <div class="absolute -top-40 left-1/4 w-96 h-96 rounded-full bg-emerald-500/5 blur-3xl"></div>
+                <div class="absolute -bottom-40 right-1/4 w-96 h-96 rounded-full bg-brand-500/5 blur-3xl"></div>
+            </div>
+
+            <!-- Canvas Container -->
+            <div class="flex-1 w-full h-full relative canvas-container cursor-grab active:cursor-grabbing" id="canvas-container">
+                <canvas id="graph-canvas" class="absolute inset-0 w-full h-full"></canvas>
+
+                <!-- Small Canvas Zoom overlay bottom left -->
+                <div class="absolute bottom-4 left-4 p-1 bg-slate-900/90 border border-slate-800/80 rounded-lg shadow-xl flex items-center space-x-1 z-10 backdrop-blur-sm">
+                    <button id="zoom-in-btn" class="p-1.5 text-slate-300 hover:bg-slate-800 rounded transition" title="Zoom In">
+                        <i data-lucide="zoom-in" class="w-3.5 h-3.5"></i>
+                    </button>
+                    <button id="zoom-out-btn" class="p-1.5 text-slate-300 hover:bg-slate-800 rounded transition" title="Zoom Out">
+                        <i data-lucide="zoom-out" class="w-3.5 h-3.5"></i>
+                    </button>
+                    <button id="reset-view-btn" class="p-1.5 text-slate-300 hover:bg-slate-800 rounded transition" title="Reset Camera View">
+                        <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Split Footer: Console Log (Left 60%) & Interactive Flow Guide (Right 40%) -->
+            <section class="h-44 border-t border-slate-800/80 bg-[#090d16] flex z-10 shrink-0 overflow-hidden">
+                
+                <!-- Left 60%: Event Log -->
+                <div class="w-3/5 border-r border-slate-800/80 flex flex-col h-full overflow-hidden">
+                    <header class="px-4 py-1.5 border-b border-slate-800/60 bg-slate-950/40 flex items-center justify-between shrink-0">
+                        <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                            <i data-lucide="terminal" class="w-3 h-3 text-emerald-400"></i> State Engine Transition Log
+                        </span>
+                        <button id="clear-console-btn" class="text-[9px] text-slate-500 hover:text-slate-300 transition uppercase tracking-wider">
+                            Clear Log
+                        </button>
+                    </header>
+                    <div id="console-output" class="flex-1 overflow-y-auto p-3 font-mono text-[11px] space-y-1 bg-black/25">
+                        <!-- Stream logs -->
+                    </div>
+                </div>
+
+                <!-- Right 40%: Visual Flow Guide -->
+                <div class="w-2/5 flex flex-col h-full overflow-hidden bg-[#0d1324]/40">
+                    <header class="px-4 py-1.5 border-b border-slate-800/60 bg-slate-950/40 flex items-center shrink-0">
+                        <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                            <i data-lucide="map" class="w-3.5 h-3.5 text-cyan-400"></i> Pipeline Architecture Guide
+                        </span>
+                    </header>
+                    <div class="flex-1 overflow-y-auto p-3.5 text-xs text-slate-400 space-y-2 leading-relaxed">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="space-y-1.5">
+                                <p class="text-[10px] font-bold text-slate-300 uppercase tracking-wider text-emerald-400">1. Normal Track</p>
+                                <ul class="space-y-1 list-disc list-inside text-[11px]">
+                                    <li><strong class="text-slate-200">Ingest & Validate</strong> parses payloads.</li>
+                                    <li><strong class="text-slate-200">Async Fork</strong> splits tasks parallel.</li>
+                                    <li><strong class="text-slate-200">Sync Aggregator</strong> locks & merges both.</li>
+                                </ul>
+                            </div>
+                            <div class="space-y-1.5">
+                                <p class="text-[10px] font-bold text-slate-300 uppercase tracking-wider text-amber-400">2. Interruption Track</p>
+                                <ul class="space-y-1 list-disc list-inside text-[11px]">
+                                    <li><strong class="text-slate-200">Interrupt</strong> hijacks slow subtasks.</li>
+                                    <li><strong class="text-slate-200">Detour Fork</strong> triggers 2 parallel events.</li>
+                                    <li><strong class="text-slate-200">Int Sync</strong> re-combines & saves state.</li>
+                                </ul>
+                            </div>
+                        </div>
+                        <p class="text-[10px] border-t border-slate-800/80 pt-2 text-slate-500 italic">
+                            Both tracks feed into the <strong class="text-cyan-400 font-semibold">Assembly Point</strong>, merging batches of <strong class="text-emerald-400 font-semibold">10 items</strong> into completed packages before arriving at the Completed State.
+                        </p>
+                    </div>
+                </div>
+
+            </section>
+        </main>
+
+    </div>
+
+    <!-- Web Audio Synthesis Engine and Visualizer Simulation Logic -->
+    <script>
+        // Initialize Lucide Icons
+        lucide.createIcons();
+
+        // Premium Web Audio Synthesizer
+        class SFXSynthesizer {
+            constructor() {
+                this.enabled = true;
+                this.ctx = null;
+            }
+
+            init() {
+                if (!this.ctx) {
+                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+            }
+
+            toggle() {
+                this.enabled = !this.enabled;
+                if (this.enabled) {
+                    this.init();
+                }
+                return this.enabled;
+            }
+
+            playIngest() {
+                if (!this.enabled) return;
+                this.init();
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(320, now);
+                osc.frequency.exponentialRampToValueAtTime(640, now + 0.08);
+                
+                gain.gain.setValueAtTime(0.04, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+                
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                
+                osc.start(now);
+                osc.stop(now + 0.08);
+            }
+
+            playComplete() {
+                if (!this.enabled) return;
+                this.init();
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(580, now);
+                osc.frequency.setValueAtTime(750, now + 0.05);
+                osc.frequency.setValueAtTime(1100, now + 0.1);
+                
+                gain.gain.setValueAtTime(0.03, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+                
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                
+                osc.start(now);
+                osc.stop(now + 0.25);
+            }
+
+            playInterrupt() {
+                if (!this.enabled) return;
+                this.init();
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(380, now);
+                osc.frequency.setValueAtTime(200, now + 0.1);
+                
+                gain.gain.setValueAtTime(0.03, now);
+                gain.gain.linearRampToValueAtTime(0.001, now + 0.18);
+                
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                
+                osc.start(now);
+                osc.stop(now + 0.18);
+            }
+
+            playAssemblyBatch() {
+                if (!this.enabled) return;
+                this.init();
+                const now = this.ctx.currentTime;
+                const osc1 = this.ctx.createOscillator();
+                const osc2 = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                
+                osc1.type = 'sawtooth';
+                osc2.type = 'sine';
+                osc1.frequency.setValueAtTime(440, now);
+                osc1.frequency.exponentialRampToValueAtTime(880, now + 0.25);
+                osc2.frequency.setValueAtTime(220, now);
+                osc2.frequency.exponentialRampToValueAtTime(660, now + 0.25);
+                
+                gain.gain.setValueAtTime(0.05, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+                
+                osc1.connect(gain);
+                osc2.connect(gain);
+                gain.connect(this.ctx.destination);
+                
+                osc1.start(now);
+                osc2.start(now);
+                osc1.stop(now + 0.3);
+                osc2.stop(now + 0.3);
+            }
+        }
+
+        const sfx = new SFXSynthesizer();
+
+        // Sound button toggle
+        const soundBtn = document.getElementById('sound-btn');
+        soundBtn.addEventListener('click', () => {
+            const enabled = sfx.toggle();
+            soundBtn.innerHTML = enabled 
+                ? '<i data-lucide="volume-2" class="w-4 h-4"></i>' 
+                : '<i data-lucide="volume-x" class="w-4 h-4 text-rose-500"></i>';
+            lucide.createIcons();
+            addLog("System", `Audio alerts ${enabled ? 'unmuted' : 'muted'}.`, 'system');
+        });
+
+        // Dynamic logger output
+        const consoleOutput = document.getElementById('console-output');
+        function addLog(source, msg, type = 'info') {
+            const now = new Date();
+            const timeStr = now.toTimeString().split(' ')[0] + '.' + String(now.getMilliseconds()).padStart(3, '0');
+            
+            let colorClass = 'text-slate-300';
+            if (type === 'success') colorClass = 'text-emerald-400 font-semibold';
+            if (type === 'warning') colorClass = 'text-amber-400';
+            if (type === 'system') colorClass = 'text-brand-400 italic';
+
+            const logEl = document.createElement('div');
+            logEl.className = "flex space-x-2 leading-relaxed opacity-90 border-b border-slate-900/30 pb-0.5";
+            logEl.innerHTML = `
+                <span class="text-slate-600 shrink-0 select-none">[${timeStr}]</span>
+                <span class="text-slate-400 shrink-0 font-bold uppercase tracking-wider text-[9px] bg-slate-900/80 px-1 rounded">${source}</span>
+                <span class="${colorClass}">${msg}</span>
+            `;
+            consoleOutput.appendChild(logEl);
+            consoleOutput.scrollTop = consoleOutput.scrollHeight;
+
+            while (consoleOutput.children.length > 50) {
+                consoleOutput.removeChild(consoleOutput.firstChild);
+            }
+        }
+
+        document.getElementById('clear-console-btn').addEventListener('click', () => {
+            consoleOutput.innerHTML = '';
+        });
+
+        // Multi-Track Pipeline Node Graph positions
+        const NODES = {
+            INGEST: { id: 'INGEST', label: 'Ingest Queue', type: 'entry', x: 120, y: 180, latency: 150, activeCount: 0, processedCount: 0, requiredOutputs: ['VALIDATE'] },
+            VALIDATE: { id: 'VALIDATE', label: 'Parse & Validate', type: 'process', x: 300, y: 180, latency: 250, activeCount: 0, processedCount: 0, requiredOutputs: ['FORK'] },
+            FORK: { id: 'FORK', label: 'Async Fork Splitter', type: 'fork', x: 480, y: 180, latency: 100, activeCount: 0, processedCount: 0, requiredOutputs: ['FAST_PATH', 'SLOW_PATH'] },
+            FAST_PATH: { id: 'FAST_PATH', label: 'Subtask A (Fast)', type: 'process', x: 660, y: 100, latency: 250, activeCount: 0, processedCount: 0, requiredOutputs: ['SYNCHRONIZER'] },
+            SLOW_PATH: { id: 'SLOW_PATH', label: 'Subtask B (Slow)', type: 'process', x: 660, y: 260, latency: 1200, activeCount: 0, processedCount: 0, requiredOutputs: ['SYNCHRONIZER'] },
+            SYNCHRONIZER: { id: 'SYNCHRONIZER', label: 'Sync Aggregator', type: 'join', x: 840, y: 180, latency: 200, activeCount: 0, processedCount: 0, requiredOutputs: ['ASSEMBLER'] },
+
+            // INTERRUPT HIGHWAY (Dual-track Subsystems)
+            INT_FORK: { id: 'INT_FORK', label: 'Interrupt Fork', type: 'fork', x: 480, y: 440, latency: 100, activeCount: 0, processedCount: 0, requiredOutputs: ['INT_FAST', 'INT_SLOW'] },
+            INT_FAST: { id: 'INT_FAST', label: 'Int Subtask A (Fast)', type: 'process', x: 660, y: 370, latency: 300, activeCount: 0, processedCount: 0, requiredOutputs: ['INT_SYNCHRONIZER'] },
+            INT_SLOW: { id: 'INT_SLOW', label: 'Int Subtask B (Slow)', type: 'process', x: 660, y: 510, latency: 1400, activeCount: 0, processedCount: 0, requiredOutputs: ['INT_SYNCHRONIZER'] },
+            INT_SYNCHRONIZER: { id: 'INT_SYNCHRONIZER', label: 'Int Sync Aggregator', type: 'join', x: 840, y: 440, latency: 200, activeCount: 0, processedCount: 0, requiredOutputs: ['ASSEMBLER'] },
+
+            // COMMON ASSEMBLY POINT & TERMINAL EXIT
+            ASSEMBLER: { id: 'ASSEMBLER', label: 'Batch Assembly Point', type: 'assembler', x: 1040, y: 310, latency: 300, activeCount: 0, processedCount: 0, requiredOutputs: ['COMPLETED'] },
+            COMPLETED: { id: 'COMPLETED', label: 'Completed State', type: 'exit', x: 1240, y: 310, latency: 100, activeCount: 0, processedCount: 0, requiredOutputs: [] }
+        };
+
+        const TRANSITIONS = [
+            // Normal track transitions
+            { id: 't1', from: 'INGEST', to: 'VALIDATE', type: 'default' },
+            { id: 't2', from: 'VALIDATE', to: 'FORK', type: 'default' },
+            { id: 't3', from: 'FORK', to: 'FAST_PATH', type: 'branch' },
+            { id: 't4', from: 'FORK', to: 'SLOW_PATH', type: 'branch' },
+            { id: 't5', from: 'FAST_PATH', to: 'SYNCHRONIZER', type: 'default' },
+            { id: 't6', from: 'SLOW_PATH', to: 'SYNCHRONIZER', type: 'default' },
+            { id: 't7', from: 'SYNCHRONIZER', to: 'ASSEMBLER', type: 'default' },
+            
+            // Interruption Highway forks
+            { id: 't_int_fork_fast', from: 'INT_FORK', to: 'INT_FAST', type: 'branch' },
+            { id: 't_int_fork_slow', from: 'INT_FORK', to: 'INT_SLOW', type: 'branch' },
+            { id: 't_int_sync_fast', from: 'INT_FAST', to: 'INT_SYNCHRONIZER', type: 'default' },
+            { id: 't_int_sync_slow', from: 'INT_SLOW', to: 'INT_SYNCHRONIZER', type: 'default' },
+            { id: 't_int_resolved', from: 'INT_SYNCHRONIZER', to: 'ASSEMBLER', type: 'default' },
+
+            // Assembly to Completed transition
+            { id: 't_assembly_done', from: 'ASSEMBLER', to: 'COMPLETED', type: 'batch_release' },
+
+            // Seamless Interruption hijack routes
+            { id: 't_interrupt_fast', from: 'FAST_PATH', to: 'INT_FORK', type: 'interrupt' },
+            { id: 't_interrupt_slow', from: 'SLOW_PATH', to: 'INT_FORK', type: 'interrupt' }
+        ];
+
+        // Global State Variables
+        let stateMachine = {
+            nodes: JSON.parse(JSON.stringify(NODES)),
+            transitions: JSON.parse(JSON.stringify(TRANSITIONS)),
+            tokens: [],
+            floatingFeedbacks: [],
+            joinBarrierData: {}
+        };
+
+        let stats = {
+            totalIngested: 0,
+            totalCompleted: 0,
+            totalInterrupted: 0,
+            runningStartTime: Date.now()
+        };
+
+        // Simulation parameters
+        let isSimRunning = true;
+        let simSpeedMultiplier = 1.0;
+        let injectRate = 4; // tokens per second
+        let interruptProbability = 10; // % chance a subtask encounters an interrupt automatically
+        let lastInjectionTime = Date.now();
+
+        // Canvas Zoom and Pan Settings (Adjusted to default fit nicely)
+        let zoomScale = 0.72;
+        let panOffsetX = 100;
+        let panOffsetY = 30;
+        let isPanning = false;
+        let panStartX = 0;
+        let panStartY = 0;
+
+        const canvasContainer = document.getElementById('canvas-container');
+        const canvas = document.getElementById('graph-canvas');
+        const ctx = canvas.getContext('2d');
+
+        function resizeCanvas() {
+            const rect = canvasContainer.getBoundingClientRect();
+            canvas.width = rect.width * window.devicePixelRatio;
+            canvas.height = rect.height * window.devicePixelRatio;
+            canvas.style.width = rect.width + 'px';
+            canvas.style.height = rect.height + 'px';
+            ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        let tokenIdCounter = 5000;
+        function generateToken(sourceId = 'INGEST', isNewIngress = false) {
+            tokenIdCounter++;
+            if (isNewIngress) {
+                stats.totalIngested++;
+                sfx.playIngest();
+            }
+            
+            return {
+                id: tokenIdCounter,
+                currentNodeId: sourceId,
+                targetNodeId: null,
+                currentTransitionId: null,
+                progress: 0,
+                speed: 0.015,
+                startTime: Date.now(),
+                stateTimer: 0,
+                isWaitingInState: true,
+                forkFamilyId: null,
+                isInterruptFlow: false,
+                isBatchContainer: false,
+                subtaskType: null
+            };
+        }
+
+        function initApp() {
+            addLog("System", "Interactive Resiliency Visualizer active. Ready.", "system");
+            updateDashboard();
+        }
+
+        function spawnFeedback(x, y, icon, color) {
+            stateMachine.floatingFeedbacks.push({
+                id: Math.random(),
+                x: x,
+                y: y - 25,
+                icon: icon,
+                color: color,
+                alpha: 1.0
+            });
+        }
+
+        // Main Simulation Step Updates
+        function updateSimulation(deltaTime) {
+            if (!isSimRunning) return;
+
+            // 1. Ingest Generator
+            if (injectRate > 0) {
+                const interval = 1000 / injectRate;
+                const timePassed = Date.now() - lastInjectionTime;
+                if (timePassed >= interval) {
+                    if (stateMachine.nodes.INGEST.activeCount < 40) {
+                        const tok = generateToken('INGEST', true);
+                        stateMachine.tokens.push(tok);
+                        stateMachine.nodes.INGEST.activeCount++;
+                    }
+                    lastInjectionTime = Date.now();
+                }
+            }
+
+            // 2. Token Progress updating & logic handling
+            for (let tok of stateMachine.tokens) {
+                if (tok.isWaitingInState) {
+                    const node = stateMachine.nodes[tok.currentNodeId];
+                    if (!node) continue;
+
+                    tok.stateTimer += deltaTime * 1000 * simSpeedMultiplier;
+
+                    // Trigger automatic scheduled random interrupts on normal branch slow paths
+                    if (tok.currentNodeId === 'SLOW_PATH' && tok.stateTimer > 300 && !tok.hasInterruptScheduled && !tok.isInterruptFlow) {
+                        tok.hasInterruptScheduled = true;
+                        if (Math.random() * 100 < interruptProbability) {
+                            triggerTokenInterrupt(tok);
+                            continue;
+                        }
+                    }
+
+                    if (tok.stateTimer >= node.latency) {
+                        tok.isWaitingInState = false;
+                        tok.stateTimer = 0;
+                        node.processedCount++;
+                        node.activeCount = Math.max(0, node.activeCount - 1);
+
+                        // Route to next state
+                        triggerNodeRouting(tok, node);
+                    }
+                } else if (tok.currentTransitionId) {
+                    // In-transit motion update
+                    const trans = stateMachine.transitions.find(t => t.id === tok.currentTransitionId);
+                    if (trans) {
+                        tok.progress += tok.speed * simSpeedMultiplier * (deltaTime * 60);
+                        if (tok.progress >= 1.0) {
+                            // Token has safely arrived at destination node
+                            const targetNode = stateMachine.nodes[trans.to];
+                            tok.currentNodeId = targetNode.id;
+                            tok.currentTransitionId = null;
+                            tok.targetNodeId = null;
+                            tok.progress = 0;
+                            tok.isWaitingInState = true;
+                            targetNode.activeCount++;
+
+                            if (targetNode.type === 'join') {
+                                handleAggregationJoin(tok, targetNode);
+                            } else if (targetNode.type === 'assembler') {
+                                handleAssemblerArrival(tok, targetNode);
+                            } else if (targetNode.type === 'exit') {
+                                handleTerminalExit(tok, targetNode);
+                            }
+                        }
+                    } else {
+                        tok.isWaitingInState = true;
+                        tok.progress = 0;
+                    }
+                }
+            }
+
+            // Floating feedback animation decay
+            for (let i = stateMachine.floatingFeedbacks.length - 1; i >= 0; i--) {
+                const fb = stateMachine.floatingFeedbacks[i];
+                fb.y -= 0.6;
+                fb.alpha -= 0.015;
+                if (fb.alpha <= 0) {
+                    stateMachine.floatingFeedbacks.splice(i, 1);
+                }
+            }
+        }
+
+        // Interrupt Hijack Routing Event
+        function triggerTokenInterrupt(tok) {
+            const node = stateMachine.nodes[tok.currentNodeId];
+            if (!node) return;
+
+            stats.totalInterrupted++;
+            sfx.playInterrupt();
+            spawnFeedback(node.x, node.y, '⚠', '#fbbf24');
+            addLog(node.label, `Interruption Signal received! Redirecting Token #${tok.id} to Interrupt track.`, 'warning');
+
+            node.activeCount = Math.max(0, node.activeCount - 1);
+            tok.isWaitingInState = false;
+            tok.stateTimer = 0;
+
+            // Route to INT_FORK detouring down
+            routeToTransition(tok, node.id, 'INT_FORK');
+        }
+
+        function triggerNodeRouting(tok, node) {
+            // Case 1: Normal track fork split
+            if (node.id === 'FORK') {
+                const forkId = Math.random().toString(36).substr(2, 9);
+                addLog(node.label, `Split Token #${tok.id} into two concurrent subtasks.`, 'info');
+                
+                stateMachine.joinBarrierData[forkId] = {
+                    fastCompleted: false,
+                    slowCompleted: false,
+                    originTokenId: tok.id,
+                    latencyStart: tok.startTime,
+                    isInterruptFlow: false
+                };
+
+                // Fast subtask clone
+                const fastToken = {
+                    ...tok,
+                    id: tokenIdCounter++,
+                    forkFamilyId: forkId,
+                    isWaitingInState: false,
+                    currentNodeId: null,
+                    stateTimer: 0,
+                    hasInterruptScheduled: false,
+                    isInterruptFlow: false,
+                    subtaskType: 'fast'
+                };
+                routeToTransition(fastToken, 'FORK', 'FAST_PATH');
+                stateMachine.tokens.push(fastToken);
+
+                // Original token becomes the Slow path subtask
+                tok.forkFamilyId = forkId;
+                tok.hasInterruptScheduled = false;
+                tok.isInterruptFlow = false;
+                tok.subtaskType = 'slow';
+                routeToTransition(tok, 'FORK', 'SLOW_PATH');
+            } 
+            // Case 2: Interruption Track Fork split (detoured parallel processing)
+            else if (node.id === 'INT_FORK') {
+                const intForkId = "int-" + Math.random().toString(36).substr(2, 9);
+                addLog(node.label, `Triggering parallel interruption recovery nodes for Token #${tok.id}.`, 'warning');
+
+                stateMachine.joinBarrierData[intForkId] = {
+                    fastCompleted: false,
+                    slowCompleted: false,
+                    originTokenId: tok.id,
+                    latencyStart: tok.startTime,
+                    isInterruptFlow: true
+                };
+
+                // Int Fast Subtask clone
+                const intFastToken = {
+                    ...tok,
+                    id: tokenIdCounter++,
+                    forkFamilyId: intForkId,
+                    isWaitingInState: false,
+                    currentNodeId: null,
+                    stateTimer: 0,
+                    isInterruptFlow: true,
+                    subtaskType: 'fast'
+                };
+                routeToTransition(intFastToken, 'INT_FORK', 'INT_FAST');
+                stateMachine.tokens.push(intFastToken);
+
+                // Original token continues to run on Int Slow path
+                tok.forkFamilyId = intForkId;
+                tok.isInterruptFlow = true;
+                tok.subtaskType = 'slow';
+                routeToTransition(tok, 'INT_FORK', 'INT_SLOW');
+            }
+            // Case 3: Standard single point routes
+            else if (node.requiredOutputs.length > 0) {
+                const targetName = node.requiredOutputs[0];
+                routeToTransition(tok, node.id, targetName);
+            }
+        }
+
+        function routeToTransition(tok, fromId, toId) {
+            const trans = stateMachine.transitions.find(t => t.from === fromId && t.to === toId);
+            if (trans) {
+                tok.currentTransitionId = trans.id;
+                tok.targetNodeId = toId;
+                tok.progress = 0;
+            } else {
+                tok.isWaitingInState = true;
+                tok.currentNodeId = fromId;
+            }
+        }
+
+        // Synchronization logic for both Assembly points
+        function handleAggregationJoin(tok, joinNode) {
+            const fId = tok.forkFamilyId;
+            if (!fId || !stateMachine.joinBarrierData[fId]) {
+                tok.isWaitingInState = true;
+                tok.stateTimer = joinNode.latency; 
+                return;
+            }
+
+            const record = stateMachine.joinBarrierData[fId];
+            if (tok.currentNodeId === 'SYNCHRONIZER' || tok.currentNodeId === 'INT_SYNCHRONIZER') {
+                // Record completion based on subtaskType
+                if (tok.subtaskType === 'fast') {
+                    record.fastCompleted = true;
+                } else if (tok.subtaskType === 'slow') {
+                    record.slowCompleted = true;
+                } else {
+                    // Safe fallback
+                    record.fastCompleted = true;
+                    record.slowCompleted = true;
+                }
+
+                // Delete the subtask segment token representation
+                stateMachine.tokens = stateMachine.tokens.filter(t => t.id !== tok.id);
+
+                // Re-combine subtasks once both parts arrive
+                if (record.fastCompleted && record.slowCompleted) {
+                    const isInt = record.isInterruptFlow;
+                    addLog(joinNode.label, `${isInt ? 'Interruption subtasks' : 'Async subtasks'} safely synchronized. Routing to Assembly.`, 'success');
+                    
+                    const mergedToken = generateToken(joinNode.id);
+                    mergedToken.id = record.originTokenId;
+                    mergedToken.startTime = record.latencyStart;
+                    mergedToken.isWaitingInState = true;
+                    mergedToken.stateTimer = 0;
+                    mergedToken.isInterruptFlow = isInt;
+
+                    stateMachine.tokens.push(mergedToken);
+                    joinNode.activeCount++;
+
+                    delete stateMachine.joinBarrierData[fId];
+                }
+            }
+        }
+
+        // Assembler Logic: Accumulates 10 tokens before pushing to Completed State
+        function handleAssemblerArrival(tok, assemblerNode) {
+            // Count of tokens currently inside the assembler queue is tracked by assemblerNode.activeCount
+            addLog("Assembler", `Aggregated token #${tok.id} arrived at Assembly queue. [ ${assemblerNode.activeCount} / 10 ]`, 'info');
+
+            // Consume/delete the individual token from active visual canvas arrays immediately
+            stateMachine.tokens = stateMachine.tokens.filter(t => t.id !== tok.id);
+
+            // Trigger batch packaging if the threshold of 10 items is reached
+            if (assemblerNode.activeCount >= 10) {
+                addLog("Assembler", "Batch limit of 10 reached! Merging into unified shipment package...", 'success');
+                sfx.playAssemblyBatch();
+                spawnFeedback(assemblerNode.x, assemblerNode.y, '📦', '#10b981');
+
+                // Generate a grand "Batch Container Token" (special visualization properties)
+                const batchToken = generateToken('ASSEMBLER');
+                batchToken.isBatchContainer = true;
+                batchToken.isWaitingInState = false; // begin traveling along transit route immediately
+                batchToken.stateTimer = 0;
+                
+                // Route to completed exit
+                routeToTransition(batchToken, 'ASSEMBLER', 'COMPLETED');
+                stateMachine.tokens.push(batchToken);
+
+                // Reset assembler queue counters
+                assemblerNode.activeCount = 0;
+                assemblerNode.processedCount += 10;
+            }
+        }
+
+        // Terminal exit finalization logic
+        function handleTerminalExit(tok, exitNode) {
+            stats.totalCompleted++;
+            sfx.playComplete();
+            spawnFeedback(exitNode.x, exitNode.y, '✔', '#10b981');
+            
+            addLog(exitNode.label, "Assembled container batch of 10 resolved gracefully!", 'success');
+
+            stateMachine.tokens = stateMachine.tokens.filter(t => t.id !== tok.id);
+            exitNode.activeCount = Math.max(0, exitNode.activeCount - 1);
+            exitNode.processedCount++;
+        }
+
+        // Render Procedures
+        function drawGraph() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            ctx.save();
+            ctx.translate(panOffsetX, panOffsetY);
+            ctx.scale(zoomScale, zoomScale);
+
+            // 1. Draw Paths / Transitions
+            for (let trans of stateMachine.transitions) {
+                const fromNode = stateMachine.nodes[trans.from];
+                const toNode = stateMachine.nodes[trans.to];
+                if (!fromNode || !toNode) continue;
+
+                let color = 'rgba(71, 85, 105, 0.4)';
+                let width = 2.5;
+                let dash = [];
+
+                if (trans.type === 'interrupt') {
+                    color = 'rgba(245, 158, 11, 0.3)';
+                    dash = [4, 4];
+                } else if (trans.type === 'batch_release') {
+                    color = 'rgba(16, 185, 129, 0.4)';
+                    width = 3;
+                }
+
+                // Color lines actively holding in-flight tokens
+                const tokensTraversing = stateMachine.tokens.filter(t => t.currentTransitionId === trans.id);
+                const hasActiveFlow = tokensTraversing.length > 0;
+
+                if (hasActiveFlow) {
+                    if (trans.type === 'interrupt') {
+                        color = '#fbbf24';
+                    } else if (trans.type === 'batch_release') {
+                        color = '#10b981';
+                        width = 4;
+                    } else {
+                        color = '#38bdf8';
+                    }
+                    width = Math.max(width, 3);
+                }
+
+                ctx.strokeStyle = color;
+                ctx.lineWidth = width;
+                ctx.setLineDash(dash);
+
+                // Bezier curves
+                ctx.beginPath();
+                const points = getCurveCoordinates(fromNode, toNode);
+                ctx.moveTo(points.start.x, points.start.y);
+                ctx.bezierCurveTo(points.cp1.x, points.cp1.y, points.cp2.x, points.cp2.y, points.end.x, points.end.y);
+                ctx.stroke();
+
+                drawPathArrow(ctx, points, color);
+            }
+            ctx.setLineDash([]);
+
+            // 2. Draw Moving Tokens
+            for (let tok of stateMachine.tokens) {
+                if (tok.currentTransitionId) {
+                    const trans = stateMachine.transitions.find(t => t.id === tok.currentTransitionId);
+                    if (trans) {
+                        const fromNode = stateMachine.nodes[trans.from];
+                        const toNode = stateMachine.nodes[trans.to];
+                        if (fromNode && toNode) {
+                            const coords = getCurveCoordinates(fromNode, toNode);
+                            const t = tok.progress;
+                            const x = Math.pow(1 - t, 3) * coords.start.x + 
+                                      3 * Math.pow(1 - t, 2) * t * coords.cp1.x + 
+                                      3 * (1 - t) * Math.pow(t, 2) * coords.cp2.x + 
+                                      Math.pow(t, 3) * coords.end.x;
+                            const y = Math.pow(1 - t, 3) * coords.start.y + 
+                                      3 * Math.pow(1 - t, 2) * t * coords.cp1.y + 
+                                      3 * (1 - t) * Math.pow(t, 2) * coords.cp2.y + 
+                                      Math.pow(t, 3) * coords.end.y;
+
+                            let color = '#0ea5e9'; // Cyan normal
+                            let size = 5;
+
+                            if (tok.isBatchContainer) {
+                                color = '#10b981'; // Green package container
+                                size = 9;
+                            } else if (tok.isInterruptFlow) {
+                                color = '#fbbf24'; // Yellow Interruption
+                            } else if (trans.type === 'interrupt') {
+                                color = '#fbbf24';
+                            }
+
+                            ctx.save();
+                            ctx.shadowBlur = tok.isBatchContainer ? 14 : 8;
+                            ctx.shadowColor = color;
+                            ctx.fillStyle = color;
+                            ctx.beginPath();
+                            ctx.arc(x, y, size, 0, Math.PI * 2);
+                            ctx.fill();
+
+                            if (tok.isBatchContainer) {
+                                // Draw inner core highlight
+                                ctx.fillStyle = '#ffffff';
+                                ctx.beginPath();
+                                ctx.arc(x, y, 4, 0, Math.PI * 2);
+                                ctx.fill();
+                            }
+                            ctx.restore();
+                        }
+                    }
+                }
+            }
+
+            // 3. Draw State Box Nodes
+            for (let key in stateMachine.nodes) {
+                const node = stateMachine.nodes[key];
+                
+                let headerColor = '#1e293b';
+                let accentColor = '#38bdf8';
+
+                if (node.type === 'entry') {
+                    headerColor = '#064e3b';
+                    accentColor = '#10b981';
+                } else if (node.type === 'exit') {
+                    headerColor = '#311042';
+                    accentColor = '#a855f7';
+                } else if (node.type === 'assembler') {
+                    headerColor = '#064e43';
+                    accentColor = '#059669';
+                } else if (node.type === 'interrupt' || node.id.startsWith('INT_')) {
+                    // Interrupt track styling elements (Amber theme)
+                    headerColor = '#451a03';
+                    accentColor = '#f59e0b';
+                }
+
+                const width = 160;
+                const height = 75;
+                const radius = 10;
+                const rx = node.x - width / 2;
+                const ry = node.y - height / 2;
+
+                ctx.save();
+                if (node.activeCount > 0) {
+                    ctx.shadowBlur = 12;
+                    ctx.shadowColor = accentColor;
+                } else {
+                    ctx.shadowBlur = 4;
+                    ctx.shadowColor = 'rgba(0,0,0,0.2)';
+                }
+
+                // Main card base
+                ctx.fillStyle = '#0f172a';
+                ctx.strokeStyle = node.activeCount > 0 ? accentColor : 'rgba(71, 85, 105, 0.5)';
+                ctx.lineWidth = node.activeCount > 0 ? 2 : 1.2;
+                drawRoundedRect(ctx, rx, ry, width, height, radius, true, true);
+                ctx.restore();
+
+                // Draw header block
+                ctx.save();
+                ctx.beginPath();
+                drawRoundedRect(ctx, rx, ry, width, 22, { tl: radius, tr: radius, bl: 0, br: 0 }, false, false);
+                ctx.clip();
+                ctx.fillStyle = headerColor;
+                ctx.fillRect(rx, ry, width, 22);
+                ctx.restore();
+
+                // Header separator line
+                ctx.strokeStyle = 'rgba(71, 85, 105, 0.3)';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(rx, ry + 22);
+                ctx.lineTo(rx + width, ry + 22);
+                ctx.stroke();
+
+                // Labels
+                ctx.fillStyle = '#f1f5f9';
+                ctx.font = 'bold 10px system-ui, -apple-system, sans-serif';
+                ctx.fillText(node.label, rx + 10, ry + 15);
+
+                // Body content renders
+                ctx.fillStyle = '#94a3b8';
+                ctx.font = '10px system-ui, -apple-system, sans-serif';
+
+                if (node.type === 'assembler') {
+                    // Custom counter block representation
+                    ctx.fillText(`Batch Queue:`, rx + 10, ry + 42);
+                    ctx.fillText(`Packages Assembled:`, rx + 10, ry + 58);
+
+                    ctx.fillStyle = node.activeCount > 0 ? '#10b981' : '#cbd5e1';
+                    ctx.font = 'bold 11px monospace';
+                    ctx.fillText(`${node.activeCount} / 10`, rx + 110, ry + 42);
+
+                    ctx.fillStyle = '#cbd5e1';
+                    ctx.fillText(`${Math.floor(node.processedCount / 10)}`, rx + 110, ry + 58);
+
+                    // Custom horizontal batch progress bar inside container
+                    ctx.fillStyle = '#1e293b';
+                    ctx.fillRect(rx + 10, ry + 64, width - 20, 3);
+                    ctx.fillStyle = '#10b981';
+                    ctx.fillRect(rx + 10, ry + 64, (width - 20) * (node.activeCount / 10), 3);
+
+                } else {
+                    // Standard queue indicators
+                    ctx.fillText(`Active Load:`, rx + 10, ry + 42);
+                    ctx.fillText(`Total Processed:`, rx + 10, ry + 58);
+
+                    ctx.fillStyle = node.activeCount > 0 ? accentColor : '#cbd5e1';
+                    ctx.font = 'bold 11px monospace';
+                    ctx.fillText(`${node.activeCount}`, rx + 115, ry + 42);
+
+                    ctx.fillStyle = '#cbd5e1';
+                    ctx.fillText(`${node.processedCount}`, rx + 115, ry + 58);
+
+                    // Processing loaders
+                    if (node.activeCount > 0) {
+                        const currentTokens = stateMachine.tokens.filter(t => t.currentNodeId === node.id && t.isWaitingInState);
+                        if (currentTokens.length > 0) {
+                            const oldest = currentTokens[0];
+                            const pct = Math.min(oldest.stateTimer / node.latency, 1.0);
+                            
+                            ctx.strokeStyle = accentColor;
+                            ctx.lineWidth = 2.5;
+                            ctx.beginPath();
+                            ctx.arc(rx + width - 18, ry + height - 18, 7, -Math.PI/2, (-Math.PI/2) + (Math.PI*2 * pct));
+                            ctx.stroke();
+                            
+                            ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+                            ctx.lineWidth = 2.5;
+                            ctx.beginPath();
+                            ctx.arc(rx + width - 18, ry + height - 18, 7, 0, Math.PI * 2);
+                            ctx.stroke();
+                        }
+                    } else if (node.type === 'exit') {
+                        // Green check circle on final exit node
+                        ctx.fillStyle = '#10b981';
+                        ctx.beginPath();
+                        ctx.arc(rx + width - 18, ry + height - 18, 6, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.strokeStyle = '#fff';
+                        ctx.lineWidth = 1.2;
+                        ctx.beginPath();
+                        ctx.moveTo(rx + width - 21, ry + height - 18);
+                        ctx.lineTo(rx + width - 19, ry + height - 16);
+                        ctx.lineTo(rx + width - 14, ry + height - 21);
+                        ctx.stroke();
+                    }
+                }
+            }
+
+            // 4. Draw Floating Check Marks / Warning feedback
+            for (let fb of stateMachine.floatingFeedbacks) {
+                ctx.save();
+                ctx.fillStyle = fb.color;
+                ctx.font = 'bold 22px system-ui, -apple-system, sans-serif';
+                ctx.globalAlpha = fb.alpha;
+                ctx.fillText(fb.icon, fb.x - 8, fb.y);
+                ctx.restore();
+            }
+
+            ctx.restore();
+        }
+
+        function getCurveCoordinates(fromNode, toNode) {
+            const width = 160;
+            const height = 75;
+            const start = { x: fromNode.x, y: fromNode.y };
+            const end = { x: toNode.x, y: toNode.y };
+
+            if (fromNode.x < toNode.x) {
+                start.x = fromNode.x + width / 2;
+                end.x = toNode.x - width / 2;
+            } else if (fromNode.x > toNode.x) {
+                start.x = fromNode.x - width / 2;
+                end.x = toNode.x + width / 2;
+            } else {
+                if (fromNode.y < toNode.y) {
+                    start.y = fromNode.y + height / 2;
+                    end.y = toNode.y - height / 2;
+                } else {
+                    start.y = fromNode.y - height / 2;
+                    end.y = toNode.y + height / 2;
+                }
+            }
+
+            const dist = Math.abs(end.x - start.x);
+            const cp1 = { x: start.x + dist * 0.4, y: start.y };
+            const cp2 = { x: end.x - dist * 0.4, y: end.y };
+
+            if (Math.abs(fromNode.x - toNode.x) < 5) {
+                cp1.x = start.x + 80;
+                cp2.x = end.x + 80;
+            }
+
+            return { start, cp1, cp2, end };
+        }
+
+        function drawPathArrow(ctx, points, color) {
+            const t = 0.5;
+            const mx = Math.pow(1 - t, 3) * points.start.x + 
+                       3 * Math.pow(1 - t, 2) * t * points.cp1.x + 
+                       3 * (1 - t) * Math.pow(t, 2) * points.cp2.x + 
+                       Math.pow(t, 3) * points.end.x;
+            const my = Math.pow(1 - t, 3) * points.start.y + 
+                       3 * Math.pow(1 - t, 2) * t * points.cp1.y + 
+                       3 * (1 - t) * Math.pow(t, 2) * points.cp2.y + 
+                       Math.pow(t, 3) * points.end.y;
+
+            const dx = points.end.x - points.start.x;
+            const dy = points.end.y - points.start.y;
+            const angle = Math.atan2(dy, dx);
+
+            ctx.save();
+            ctx.fillStyle = color;
+            ctx.translate(mx, my);
+            ctx.rotate(angle);
+            ctx.beginPath();
+            ctx.moveTo(-4, -3.5);
+            ctx.lineTo(4, 0);
+            ctx.lineTo(-4, 3.5);
+            ctx.fill();
+            ctx.restore();
+        }
+
+        function drawRoundedRect(ctx, x, y, width, height, radius, fill, stroke) {
+            let r = { tl: 0, tr: 0, bl: 0, br: 0 };
+            if (typeof radius === 'number') {
+                r = { tl: radius, tr: radius, bl: radius, br: radius };
+            } else {
+                r = { ...r, ...radius };
+            }
+            ctx.beginPath();
+            ctx.moveTo(x + r.tl, y);
+            ctx.lineTo(x + width - r.tr, y);
+            ctx.quadraticCurveTo(x + width, y, x + width, y + r.tr);
+            ctx.lineTo(x + width, y + height - r.br);
+            ctx.quadraticCurveTo(x + width, y + height, x + width - r.br, y + height);
+            ctx.lineTo(x + r.bl, y + height);
+            ctx.quadraticCurveTo(x, y + height, x, y + height - r.bl);
+            ctx.lineTo(x, y + r.tl);
+            ctx.quadraticCurveTo(x, y, x + r.tl, y);
+            ctx.closePath();
+            if (fill) ctx.fill();
+            if (stroke) ctx.stroke();
+        }
+
+        let lastStatsUpdateTime = Date.now();
+        function updateDashboard() {
+            const activeTokenCount = stateMachine.tokens.length;
+            document.getElementById('header-active-tokens').innerText = activeTokenCount;
+            document.getElementById('header-processed').innerText = stats.totalCompleted;
+        }
+
+        // Panning coordinates
+        canvas.addEventListener('mousedown', (e) => {
+            isPanning = true;
+            panStartX = e.clientX - panOffsetX;
+            panStartY = e.clientY - panOffsetY;
+            canvasContainer.style.cursor = 'grabbing';
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (isPanning) {
+                panOffsetX = e.clientX - panStartX;
+                panOffsetY = e.clientY - panStartY;
+            }
+        });
+
+        window.addEventListener('mouseup', () => {
+            isPanning = false;
+            canvasContainer.style.cursor = 'grab';
+        });
+
+        // Controller Event listeners
+        const playPauseBtn = document.getElementById('play-pause-btn');
+        playPauseBtn.addEventListener('click', () => {
+            isSimRunning = !isSimRunning;
+            if (isSimRunning) {
+                playPauseBtn.className = "flex items-center justify-center space-x-1.5 py-1.5 px-3.5 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white rounded-lg transition font-medium text-xs";
+                playPauseBtn.innerHTML = '<i data-lucide="pause" class="w-3.5 h-3.5"></i><span class="btn-text">Running</span>';
+                addLog("System", "State machine simulation resumed.", "system");
+            } else {
+                playPauseBtn.className = "flex items-center justify-center space-x-1.5 py-1.5 px-3.5 bg-amber-600 hover:bg-amber-500 active:bg-amber-700 text-white rounded-lg transition font-medium text-xs";
+                playPauseBtn.innerHTML = '<i data-lucide="play" class="w-3.5 h-3.5"></i><span class="btn-text">Paused</span>';
+                addLog("System", "State machine simulation paused.", "warning");
+            }
+            lucide.createIcons();
+        });
+
+        document.getElementById('inject-token-btn').addEventListener('click', () => {
+            const tok = generateToken('INGEST', true);
+            stateMachine.tokens.push(tok);
+            stateMachine.nodes.INGEST.activeCount++;
+            addLog("Ingress", `Manual payload injected. Token #${tok.id} processing.`, 'info');
+        });
+
+        // Manual Interrupt button trigger (Hijacks tokens from the normal processing subtasks)
+        document.getElementById('trigger-interrupt-btn').addEventListener('click', () => {
+            // Find slow subtask or fast subtask currently processing in normal track
+            const targetToken = stateMachine.tokens.find(t => (t.currentNodeId === 'SLOW_PATH' || t.currentNodeId === 'FAST_PATH') && t.isWaitingInState && !t.isInterruptFlow);
+            if (targetToken) {
+                triggerTokenInterrupt(targetToken);
+            } else {
+                // Direct Inject to INT_FORK if normal track has no active elements in subtasks
+                const tok = generateToken('INT_FORK');
+                tok.isWaitingInState = true;
+                tok.stateTimer = 0;
+                tok.isInterruptFlow = true;
+                stateMachine.tokens.push(tok);
+                stateMachine.nodes.INT_FORK.activeCount++;
+                stats.totalInterrupted++;
+                sfx.playInterrupt();
+                spawnFeedback(stateMachine.nodes.INT_FORK.x, stateMachine.nodes.INT_FORK.y, '⚠', '#fbbf24');
+                addLog("Interrupt Bus", "Manual SIGINT injected. Subtask detours routing immediately down to Interrupt track.", "warning");
+            }
+        });
+
+        // Sliders
+        document.getElementById('slider-speed').addEventListener('input', (e) => {
+            simSpeedMultiplier = parseFloat(e.target.value);
+            document.getElementById('val-speed').innerText = `${simSpeedMultiplier.toFixed(1)}x`;
+        });
+
+        document.getElementById('slider-inject-rate').addEventListener('input', (e) => {
+            injectRate = parseInt(e.target.value);
+            document.getElementById('val-inject-rate').innerText = injectRate > 0 ? `${injectRate}/s` : "Off";
+        });
+
+        document.getElementById('slider-interrupt-prob').addEventListener('input', (e) => {
+            interruptProbability = parseInt(e.target.value);
+            document.getElementById('val-interrupt-prob').innerText = `${interruptProbability}%`;
+        });
+
+        // Reset metrics
+        document.getElementById('reset-metrics-btn').addEventListener('click', () => {
+            stats.totalIngested = 0;
+            stats.totalCompleted = 0;
+            stats.totalInterrupted = 0;
+            stats.runningStartTime = Date.now();
+            
+            for (let key in stateMachine.nodes) {
+                stateMachine.nodes[key].processedCount = 0;
+                stateMachine.nodes[key].activeCount = 0;
+            }
+            stateMachine.tokens = [];
+            stateMachine.joinBarrierData = {};
+
+            addLog("System Info", "All visual metrics and state traces reset safely.", "system");
+        });
+
+        // Zoom/View Keys
+        document.getElementById('zoom-in-btn').addEventListener('click', () => {
+            zoomScale = Math.min(zoomScale * 1.15, 1.8);
+        });
+
+        document.getElementById('zoom-out-btn').addEventListener('click', () => {
+            zoomScale = Math.max(zoomScale / 1.15, 0.4);
+        });
+
+        document.getElementById('reset-view-btn').addEventListener('click', () => {
+            zoomScale = 0.72;
+            panOffsetX = 100;
+            panOffsetY = 30;
+        });
+
+        // Main Execution Frame loop
+        let lastFrameTime = performance.now();
+        function mainLoop(timestamp) {
+            const deltaTime = Math.min((timestamp - lastFrameTime) / 1000, 0.1);
+            lastFrameTime = timestamp;
+
+            updateSimulation(deltaTime);
+            drawGraph();
+
+            if (Date.now() - lastStatsUpdateTime >= 200) {
+                updateDashboard();
+                lastStatsUpdateTime = Date.now();
+            }
+
+            requestAnimationFrame(mainLoop);
+        }
+
+        initApp();
+        requestAnimationFrame(mainLoop);
+
+    </script>
+</body>
+</html>

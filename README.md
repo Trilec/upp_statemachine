@@ -45,7 +45,7 @@ upp_statemachine/
 - Duplicate states and duplicate `from` + `event` transitions are rejected.
 - `Start()` and `TriggerEvent()` return `bool`.
 - `TriggerEvent()` validates source and target before it can return `true`.
-- `EventPolicy` supports reject and drop behavior now; queue is declared but not fully implemented.
+- `EventPolicy` supports reject, drop, and bounded FIFO event-name queueing for `TriggerEvent()` while transitioning.
 - `TriggerEvent()` while transitioning reports policy-specific errors.
 - `IsStarted()` reports whether startup has been accepted and the machine owns a current initial state.
 - `Start()` treats the initial `OnEnter` as a transition phase.
@@ -59,7 +59,8 @@ upp_statemachine/
 - History inspection helpers are available for tests and diagnostics.
 - Logging is disabled by default.
 - `OnAfter` uses the exact transition object passed in.
-- Event queueing and transition cancellation are not implemented yet.
+- Queueing is limited to queued `TriggerEvent()` event names only; queued `TryTransition()` and `GoBack()` are not supported.
+- Transition cancellation is not implemented.
 - `true` usually means the operation was accepted or began, not that async work has finished.
 
 ## Minimal Example

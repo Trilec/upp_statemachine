@@ -9,7 +9,7 @@
 - [ ] Confirm `docs/API.md` matches public header
 - [ ] Confirm `CHANGELOG.md` updated
 - [ ] Confirm no TODO claims implemented features that are not implemented
-- [ ] Confirm event queueing is not documented as implemented
+- [ ] Confirm queueing docs match the bounded FIFO `TriggerEvent()`-only implementation
 - [ ] Confirm transition cancellation is not documented as implemented
 - [ ] Confirm GUI code is only under `examples/`
 - [ ] Confirm `statemachine/statemachine.upp` has no `mainconfig`

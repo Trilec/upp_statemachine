@@ -91,17 +91,19 @@ state without exposing the caller to the internal transition machinery.
 - When successful transition completion callbacks run, `GetCurrent()` already
   returns the target state, the history entry is committed, and
   `IsTransitioning()` remains `true` until the callback chain unwinds.
-- `EventPolicy` is stored on the machine, but queueing is not implemented yet.
+- `EventPolicy` controls only `TriggerEvent()` calls that arrive while a transition is already active.
 - Current implemented behavior:
   - `RejectWhileTransitioning`
   - `DropWhileTransitioning`
-- Declared but not fully implemented:
   - `QueueWhileTransitioning`
 - `TriggerEvent()` while transitioning reports:
   - `EventRejectedWhileTransitioning`
   - `EventDroppedWhileTransitioning`
-  - `EventQueueingNotImplemented`
-- Event queueing is not implemented.
+  - `EventQueueFull`
+- `QueueWhileTransitioning` uses a bounded FIFO queue of event names only.
+- Queued events drain only after a successful transition fully finishes and `transitioning` has been cleared.
+- Failed active transitions leave the queue intact.
+- Failed queued events are removed, preserve their failure error, and stop the remaining drain.
 - Transition cancellation is not implemented.
 - Hierarchical states are not implemented.
 - In this API, `true` usually means the operation was accepted or began; it does not imply async completion.

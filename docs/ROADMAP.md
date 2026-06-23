@@ -11,22 +11,17 @@
 
 - `RejectWhileTransitioning` is implemented.
 - `DropWhileTransitioning` is implemented.
-- `QueueWhileTransitioning` is declared but not fully implemented yet.
+- `QueueWhileTransitioning` is implemented as a bounded FIFO queue of event names for `TriggerEvent()` only.
 
 ### Event queue policy
 
-Queueing is not implemented yet. The options are:
+Current options are:
 
 - `DropWhileTransitioning`
 - `QueueWhileTransitioning`
 - `RejectWhileTransitioning`
 
-Current behavior is:
-
-- `RejectWhileTransitioning`
-- `DropWhileTransitioning`
-
-`QueueWhileTransitioning` is declared but not fully implemented yet.
+Queueing intentionally stays small: bounded, FIFO, event-name only, and single-threaded.
 
 ## Later
 

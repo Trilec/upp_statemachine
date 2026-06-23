@@ -99,6 +99,7 @@ static String GetStateMachineErrorText(StateMachineError error) {
     case StateMachineError::BackTransitionFailed: return "Back transition failed";
     case StateMachineError::EventRejectedWhileTransitioning: return "Event rejected while transitioning";
     case StateMachineError::EventDroppedWhileTransitioning: return "Event dropped while transitioning";
+    case StateMachineError::EventQueueFull: return "Event queue full";
     case StateMachineError::EventQueueingNotImplemented: return "Event queueing not implemented";
     }
     return "Unknown error";
@@ -275,9 +276,13 @@ bool StateMachine::TriggerEvent(const String& e) {
             last_error = StateMachineError::EventDroppedWhileTransitioning;
             break;
         case EventPolicy::QueueWhileTransitioning:
-            last_error = StateMachineError::EventQueueingNotImplemented;
-            break;
+            return QueueEvent(e);
         }
+        return false;
+    }
+
+    if (e.IsEmpty()) {
+        last_error = StateMachineError::EmptyEvent;
         return false;
     }
 
@@ -423,6 +428,7 @@ bool StateMachine::Reset() {
     started = false;
     transitioning = false;
     transitionHistory.Clear();
+    queued_events.Clear();
     ClearError();
     return true;
 }
@@ -443,8 +449,18 @@ bool StateMachine::Clear() {
     states.Clear();
     transitions.Clear();
     transitionHistory.Clear();
+    queued_events.Clear();
     ClearError();
     return true;
+}
+
+void StateMachine::SetMaxQueuedEvents(int n) {
+    if (n < 0)
+        n = 0;
+    max_queued_events = n;
+    while (queued_events.GetCount() > max_queued_events)
+        queued_events.Remove(queued_events.GetCount() - 1);
+    ClearError();
 }
 
 //------------------------------------------------------------------------------
@@ -526,6 +542,8 @@ bool StateMachine::DoTransition(const Transition& t,
                 last_error = StateMachineError::ExitFailed;
         }
         transitioning = false;
+        if (success)
+            DrainQueuedEvents();
         if (on_done) on_done(success);
     };
 
@@ -573,6 +591,38 @@ bool StateMachine::DoTransition(const Transition& t,
         on_exit_done(true);
 
     return true;
+}
+
+bool StateMachine::QueueEvent(const String& e) {
+    if (e.IsEmpty()) {
+        last_error = StateMachineError::EmptyEvent;
+        return false;
+    }
+    if (max_queued_events <= 0 || queued_events.GetCount() >= max_queued_events) {
+        last_error = StateMachineError::EventQueueFull;
+        return false;
+    }
+    queued_events.Add(e);
+    ClearError();
+    return true;
+}
+
+void StateMachine::DrainQueuedEvents() {
+    if (processing_queue)
+        return;
+
+    processing_queue = true;
+    while (!queued_events.IsEmpty() && started && !transitioning) {
+        String event = queued_events[0];
+        queued_events.Remove(0);
+        if (!TriggerEvent(event))
+            break;
+        if (transitioning)
+            break;
+        if (last_error != StateMachineError::None)
+            break;
+    }
+    processing_queue = false;
 }
 
 //------------------------------------------------------------------------------
