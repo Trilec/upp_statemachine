@@ -1,12 +1,33 @@
-/**
- * main.cpp
- * A GUI test harness for the StateMachine library.
- *
- * This application provides a comprehensive test suite for the StateMachine class,
- * executing a series of validation tests in a user-friendly graphical interface.
- * It features a custom LogView control for detailed, color-coded output and allows
- * for real-time monitoring and cancellation of the test run.
- */
+/*
+    Author
+    - C Edwards (dodobar)
+
+    License
+    - Apache License 2.0, matching this repository's LICENSE file.
+
+    StateMachineGuiTest
+    ===================
+
+    Purpose
+    - Lightweight GUI example and visual test harness for the StateMachine core.
+
+    Intent
+    - Demonstrate StateMachine usage in a U++ GUI context.
+    - Provide a simple visual surface for transition/logging experiments.
+    - Keep the authoritative behavioral coverage in StateMachineCoreTest.
+
+    Thread context
+    - U++ GUI thread.
+
+    Usage
+    - Build the package to verify the core library links cleanly with CtrlLib
+      and GUI packages.
+    - Use this example for manual observation, not as the primary regression
+      test suite.
+
+    Changelog
+    - 2026-06: aligned header and usage notes for v0.1.0 release preparation.
+*/
 
 #include <CtrlLib/CtrlLib.h>
 #include <RichEdit/RichEdit.h>

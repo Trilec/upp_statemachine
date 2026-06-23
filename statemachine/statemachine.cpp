@@ -1,74 +1,38 @@
 /*
-  StateMachine: Asynchronous, general-purpose FSM for U++
+    Author
+    - C Edwards (dodobar)
 
-  Overview:
-    • Define states and transitions with optional guards and callbacks
-    • Asynchronous OnEnter / OnExit handlers
-    • Built-in history tracking and GoBack()
+    License
+    - Apache License 2.0, matching this repository's LICENSE file.
 
-  Usage:
-    1) Define machine and initial state
-       StateMachine fsm;
-       if(!fsm.AddState({ "Idle", {}, {} }))
-         return;
-       if(!fsm.AddState({ "Working", enterWorking, exitWorking }))
-         return;
-       if(!fsm.SetInitial("Idle"))
-         return;
+    StateMachine implementation
+    ===========================
 
-    2) Add transitions
-       // Idle --"start"--> Working
-       if(!fsm.AddTransition({
-         "start",     // event
-         "Idle",      // from
-         "Working",   // to
-         nullptr,     // guard
-         nullptr,     // onBefore
-         nullptr      // onAfter
-       }))
-         return;
+    Purpose
+    - Implements the compact U++ StateMachine core declared in
+      statemachine/statemachine.h.
 
-    3) Start and fire events
-       if(!fsm.Start())
-         LOG(fsm.GetLastErrorText());
-       if(!fsm.TriggerEvent("start"))
-         LOG(fsm.GetLastErrorText());
+    Intent
+    - Keep transition execution deterministic and easy to audit.
+    - Preserve source state until OnEnter succeeds.
+    - Commit current/history before WhenTransitionFinished and OnAfter.
+    - Keep failure rollback explicit: failed exit/enter/startup must not corrupt
+      current state or history.
+    - Keep QueueWhileTransitioning lightweight: bounded FIFO event-name queue,
+      drained only after successful completion.
 
-  UI Example: switch panels on button click
-    // assume TopWindow has two panels: panelA, panelB and a Button btn
-    StateMachine uiFsm;
-    if(!uiFsm.AddState({ "A",
-      [&](StateMachine&, Function<void(bool)> done){
-        panelA.Show(); panelB.Hide();
-        done(true);
-      },
-      nullptr
-    }))
-      return;
-    if(!uiFsm.AddState({ "B",
-      [&](StateMachine&, Function<void(bool)> done){
-        panelB.Show(); panelA.Hide();
-        done(true);
-      },
-      nullptr
-    }))
-      return;
-    if(!uiFsm.SetInitial("A"))
-      return;
-    if(!uiFsm.AddTransition({ "toB", "A", "B", nullptr, nullptr, nullptr }))
-      return;
-    if(!uiFsm.AddTransition({ "toA", "B", "A", nullptr, nullptr, nullptr }))
-      return;
-    if(!uiFsm.Start())
-      LOG(uiFsm.GetLastErrorText());
-    btn <<= [&]{
-      if(!uiFsm.TriggerEvent("toB"))
-        LOG(uiFsm.GetLastErrorText());
-    };
+    Thread context
+    - Same-thread / same-callback-chain use.
+    - No internal locking or background execution.
+
+    Usage
+    - Include statemachine/statemachine.h from client code.
+    - See README.md and docs/API.md for public examples and contract details.
+
+    Changelog
+    - 2026-06: v0.1.0 release-prep cleanup after queueing, async rollback,
+      and invariant-test hardening.
 */
-
- 
-
 #include "statemachine.h"
 
 #include <memory>

@@ -1,3 +1,38 @@
+/*
+    Author
+    - C Edwards (dodobar)
+
+    License
+    - Apache License 2.0, matching this repository's LICENSE file.
+
+    StateMachineCoreTest
+    ====================
+
+    Purpose
+    - Console regression and robustness test suite for the StateMachine core.
+
+    Intent
+    - Validate the compact FSM contract with deterministic, pasteable output.
+    - Cover configuration, startup, lifecycle control, error API, transition
+      rollback, callback ordering, async completion, event policies, queueing,
+      history invariants, reentrancy, reset/reuse, and stress scenarios.
+    - Prefer explicit checks and readable failure messages over opaque assertions.
+
+    Thread context
+    - Console test process.
+    - Same-thread callback simulation.
+    - Async behavior is simulated by storing and later invoking completion
+      callbacks.
+
+    Usage
+    - Build/run with the U++ toolchain and assembly recorded for this repository.
+    - Expected v0.1.0 release baseline: StateMachineCoreTest passes 189/189.
+
+    Changelog
+    - 2026-06: hardened for v0.1.0 with invariant checks, seeded sequence tests,
+      async edge cases, strict queue-policy coverage, and release baseline output.
+*/
+
 #include <Core/Core.h>
 #include <statemachine/statemachine.h>
 

@@ -1,29 +1,45 @@
-// statemachine/statemachine.h
-// Asynchronous, event-driven FSM for U++
-// -------------------------------------------------------
-// Lightweight finite-state-machine helper for orchestrating UI / logic flow in
-// Ultimate++ applications. No external dependencies.
-//
-// Overview:
-//   • Event-based transitions via TriggerEvent()
-//   • Async enter/exit using done(bool) callbacks
-//   • Transition hooks: Guard / OnBefore / OnAfter
-//   • History stack + GoBack()
-//
-// Example:
-//     StateMachine sm;
-//     if(!sm.AddState({ "Idle", {}, {} }))
-//         return;
-//     if(!sm.AddState({ "Working", enterWorking, exitWorking }))
-//         return;
-//     if(!sm.SetInitial("Idle"))
-//         return;
-//     if(!sm.AddTransition({ "start", "Idle", "Working" }))
-//         return;
-//     if(!sm.Start())
-//         LOG(sm.GetLastErrorText());
-//     if(!sm.TriggerEvent("start"))
-//         LOG(sm.GetLastErrorText());
+/*
+    Author
+    - C Edwards (dodobar)
+
+    License
+    - Apache License 2.0, matching this repository's LICENSE file.
+
+    StateMachine
+    ============
+
+    Purpose
+    - Lightweight asynchronous finite-state-machine helper for U++ applications.
+    - Provides event-driven transitions, optional guards, async enter/exit
+      callbacks, transition hooks, history, GoBack(), and bounded event-name
+      queueing.
+
+    Intent
+    - Keep the FSM compact, predictable, and dependency-light.
+    - Support flat state graphs with explicit event transitions.
+    - Keep queueing strict: TriggerEvent() names only, bounded FIFO, no payloads,
+      no queued TryTransition(), and no queued GoBack().
+    - Avoid framework expansion: no hierarchy, cancellation, background worker,
+      thread locking, or GUI dependency in the core package.
+
+    Thread context
+    - Same-thread / same-callback-chain use.
+    - The class does not provide internal locking.
+    - The StateMachine object must outlive pending async completion callbacks.
+
+    Usage
+    - Add states with AddState(...), configure SetInitial(...), add transitions
+      with AddTransition(...), then call Start().
+    - TriggerEvent(...) returns true when a transition or queued event is
+      accepted/begun, not necessarily when async work has completed.
+    - Use GetLastError() / GetLastErrorText() after false returns.
+    - Use Reset() to clear runtime state while keeping configuration.
+    - Use Clear() to remove runtime state and configuration.
+
+    Changelog
+    - 2026-06: prepared v0.1.0 compact FSM API with async transitions,
+      history, GoBack(), strict event policy handling, and bounded FIFO queueing.
+*/
 
 #pragma once
 
