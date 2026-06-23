@@ -388,10 +388,10 @@ finished.
 
 ## Current limitations
 
-- Events fired during a transition are ignored, not queued.
+- Events fired during a transition follow the configured `EventPolicy`.
 - `Start()` uses a synthetic `__start` history record instead of a normal transition event.
 - Async callbacks capture the `StateMachine` object. The caller must ensure the `StateMachine` outlives pending callbacks.
 - `GoBack()` uses a synthetic direct transition named `"__back"`.
 - `GoBack()` does not require a registered reverse transition.
-- Event queueing is not implemented.
+- Queueing is implemented only for queued `TriggerEvent()` event names under `QueueWhileTransitioning`.
 - Transition cancellation is not implemented.
