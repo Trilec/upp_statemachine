@@ -5,6 +5,8 @@ uses
     Draw,
     CtrlCore,
     CtrlLib,
+    Painter,
+    Animation,
     Ui,
     statemachine;
 
