@@ -176,7 +176,8 @@ void GraphView::DrawToken(Draw& w, const VisualToken& t)
     double dx = abs(end.x - start.x);
     Pointf p1(start.x + max(60.0, dx * 0.45), start.y);
     Pointf p2(end.x - max(60.0, dx * 0.45), end.y);
-    Pointf p = CubicPoint(p0, p1, p2, p3, clamp(t.progress, 0.0, 1.0));
+    double tt = min(1.0, max(0.0, t.progress));
+    Pointf p = CubicPoint(p0, p1, p2, p3, tt);
 
     int r = t.batch ? DPI(7) : DPI(5);
     w.DrawEllipse(RectC((int)p.x - r, (int)p.y - r, 2 * r, 2 * r), t.color);
