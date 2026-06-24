@@ -1,0 +1,23 @@
+description "Animated StateMachine visualizer example";
+
+uses
+    Core,
+    Draw,
+    CtrlCore,
+    CtrlLib,
+    Ui,
+    statemachine;
+
+file
+    VisualizerModel.h,
+    StateNodeCard.h,
+    StateNodeCard.cpp,
+    GraphView.h,
+    GraphView.cpp,
+    VisualizerApp.h,
+    VisualizerApp.cpp,
+    main.cpp,
+    GARY_NOTES.md;
+
+mainconfig
+    "" = "GUI";
