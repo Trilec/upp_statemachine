@@ -100,10 +100,21 @@ state without exposing the caller to the internal transition machinery.
   - `EventRejectedWhileTransitioning`
   - `EventDroppedWhileTransitioning`
   - `EventQueueFull`
+  - `EventQueueDrainLimitReached`
 - `QueueWhileTransitioning` uses a bounded FIFO queue of event names only.
 - Queued events drain only after a successful transition fully finishes and `transitioning` has been cleared.
-- Failed active transitions leave the queue intact.
+- Failed active transitions leave the queue intact, except failed startup clears queued events during rollback.
 - Failed queued events are removed, preserve their failure error, and stop the remaining drain.
+- Self-feeding synchronous drain chains are bounded by `max_queued_events` per drain cycle.
+- `EventQueueDrainLimitReached` protects against accidental infinite synchronous drain loops.
 - Transition cancellation is not implemented.
 - Hierarchical states are not implemented.
 - In this API, `true` usually means the operation was accepted or began; it does not imply async completion.
+
+## Future directions
+
+- cancellation policy
+- hierarchical states
+- optional GUI/state-view helpers
+- code-generation helpers
+- UppHub packaging notes

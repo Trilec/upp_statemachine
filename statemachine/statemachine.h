@@ -71,6 +71,7 @@ namespace Upp {
 		EventRejectedWhileTransitioning,
 		EventDroppedWhileTransitioning,
 		EventQueueFull,
+		EventQueueDrainLimitReached,
 	};
 
 	// Only TriggerEvent() participates in queueing under QueueWhileTransitioning.

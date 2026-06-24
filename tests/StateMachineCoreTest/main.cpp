@@ -26,7 +26,7 @@
 
     Usage
     - Build/run with the U++ toolchain and assembly recorded for this repository.
-    - Expected v0.1.0 release baseline: StateMachineCoreTest passes 189/189.
+    - Expected v0.1.0 release baseline: StateMachineCoreTest passes 190/190.
 
     Changelog
     - 2026-06: hardened for v0.1.0 with invariant checks, seeded sequence tests,
@@ -3719,6 +3719,42 @@ CONSOLE_APP_MAIN
             ctx.Check(sm.GetQueuedEventCount() == 1, "Queue should trim to the new limit");
             finish_exit(true);
             ctx.Check(sm.GetCurrent() == "C", "Newest queued event should be trimmed from the back");
+        });
+
+        add("Self-feeding synchronous queue drain stops at configured limit", [](TestContext& ctx) {
+            Function<void(bool)> finish_exit;
+            StateMachine sm;
+            int loop_runs = 0;
+            sm.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
+            sm.SetMaxQueuedEvents(3);
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto done) { done(true); }, [&](StateMachine&, Function<void(bool)> done) { finish_exit = pick(done); }});
+            sm.AddState({"B", [](auto&, auto done) { done(true); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+            Transition loop{"loop", "B", "B"};
+            loop.OnAfter = [&](const TransitionContext&) {
+                ++loop_runs;
+                ctx.Check(sm.TriggerEvent("loop"), "Self-feeding loop should enqueue the next event before the drain limit is hit");
+            };
+            sm.AddTransition(loop);
+
+            ctx.Check(sm.Start(), "Start() should return true");
+            ctx.Check(sm.TriggerEvent("go"), "A->B should begin");
+            ctx.Check(sm.TriggerEvent("loop"), "First loop event should queue");
+            finish_exit(true);
+
+            ctx.Check(loop_runs == 3, "Drain should process only the configured number of synchronous queued events");
+            ctx.Check(sm.GetLastError() == StateMachineError::EventQueueDrainLimitReached, "Drain limit should report EventQueueDrainLimitReached");
+            ctx.Check(sm.GetQueuedEventCount() == 1, "Remaining queued events should stay queued after the drain limit is hit");
+            ctx.Check(sm.IsStarted(), "Drain limit should not corrupt started state");
+            ctx.Check(!sm.IsTransitioning(), "Drain limit should leave the machine idle");
+            ctx.Check(sm.GetCurrent() == "B", "Drain limit should preserve the committed current state");
+            ctx.Check(sm.GetHistoryCount() == 5, "History should contain startup, A->B, and the processed queued loop transitions");
+            ctx.Check(sm.GetHistoryEvent(0) == "__start", "History should still begin with __start");
+            ctx.Check(sm.GetHistoryEvent(1) == "go", "A->B should remain the first real transition");
+            ctx.Check(sm.GetHistoryEvent(2) == "loop", "Processed queued events should still be committed in history");
+            ctx.Check(sm.GetHistoryEvent(3) == "loop", "Processed queued events should still be committed in history");
+            ctx.Check(sm.GetHistoryEvent(4) == "loop", "Processed queued events should still be committed in history");
         });
 
         add("Queued event during active GoBack drains after history pop", [](TestContext& ctx) {

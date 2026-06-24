@@ -64,6 +64,7 @@ static String GetStateMachineErrorText(StateMachineError error) {
     case StateMachineError::EventRejectedWhileTransitioning: return "Event rejected while transitioning";
     case StateMachineError::EventDroppedWhileTransitioning: return "Event dropped while transitioning";
     case StateMachineError::EventQueueFull: return "Event queue full";
+    case StateMachineError::EventQueueDrainLimitReached: return "Event queue drain limit reached";
     }
     return "Unknown error";
 }
@@ -577,9 +578,16 @@ void StateMachine::DrainQueuedEvents() {
         return;
 
     processing_queue = true;
+    const int drain_limit = max_queued_events > 0 ? max_queued_events : 0;
+    int drain_steps = 0;
     while (!queued_events.IsEmpty() && started && !transitioning) {
+        if (drain_steps >= drain_limit) {
+            last_error = StateMachineError::EventQueueDrainLimitReached;
+            break;
+        }
         String event = queued_events[0];
         queued_events.Remove(0);
+        ++drain_steps;
         if (!TriggerEvent(event))
             break;
         if (transitioning)

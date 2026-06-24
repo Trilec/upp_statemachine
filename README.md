@@ -18,12 +18,9 @@ upp_statemachine/
 │   └── StateMachineCoreTest/
 │       ├── StateMachineCoreTest.upp
 │       └── main.cpp
-├── docs/
+ ├── docs/
 │   ├── DESIGN.md
-│   ├── API.md
-│   ├── TESTING.md
-│   ├── ROADMAP.md
-│   └── RELEASE_CHECKLIST.md
+│   └── API.md
 ├── README.md
 ├── CHANGELOG.md
 └── LICENSE
@@ -35,6 +32,12 @@ upp_statemachine/
 - `examples/StateMachineGuiTest/StateMachineGuiTest.upp` builds the GUI test harness.
 - `tests/StateMachineCoreTest/StateMachineCoreTest.upp` builds the console core tests.
 
+## Release Baseline
+
+- `StateMachineCoreTest`: `190/190`
+- `StateMachineGuiTest`: builds
+- `statemachine/statemachine.upp`: `Core` only
+
 ## Notes
 
 - The library sources live in `statemachine/`.
@@ -45,8 +48,12 @@ upp_statemachine/
 - Duplicate states and duplicate `from` + `event` transitions are rejected.
 - `Start()` and `TriggerEvent()` return `bool`.
 - `TriggerEvent()` validates source and target before it can return `true`.
-- `EventPolicy` supports reject, drop, and bounded FIFO event-name queueing for `TriggerEvent()` while transitioning.
-- `TriggerEvent()` while transitioning reports policy-specific errors.
+- `EventPolicy` supports:
+  - `RejectWhileTransitioning`
+  - `DropWhileTransitioning`
+  - `QueueWhileTransitioning` as a bounded FIFO `TriggerEvent()`-only queue
+- Queue capacity failures report `EventQueueFull`.
+- Drain-cycle protection reports `EventQueueDrainLimitReached`.
 - `IsStarted()` reports whether startup has been accepted and the machine owns a current initial state.
 - `Start()` treats the initial `OnEnter` as a transition phase.
 - Async completion callbacks are single-shot.
@@ -60,6 +67,7 @@ upp_statemachine/
 - Logging is disabled by default.
 - `OnAfter` uses the exact transition object passed in.
 - Queueing is limited to queued `TriggerEvent()` event names only; queued `TryTransition()` and `GoBack()` are not supported.
+- `StateMachineGuiTest` is a GUI example and manual visual harness, not the authoritative regression suite.
 - Transition cancellation is not implemented.
 - `true` usually means the operation was accepted or began, not that async work has finished.
 

@@ -10,6 +10,7 @@ Initial compact U++ state machine release.
 - Moved reusable U++ package into `statemachine/`.
 - Moved GUI test harness into `examples/StateMachineGuiTest/`.
 - Finalized `EventPolicy` behavior for reject, drop, and bounded FIFO queued `TriggerEvent()` names while transitioning.
+- Added a bounded synchronous queue drain-cycle limit using `max_queued_events`.
 - Hardened `Start()`, `TriggerEvent()`, and `TryTransition()` return values and state checks.
 - Committed transition history before `WhenTransitionFinished` and `OnAfter` so completion callbacks observe the finalized transition.
 - Added lightweight error reporting via `GetLastError()` and `GetLastErrorText()`.
@@ -35,6 +36,7 @@ Initial compact U++ state machine release.
 - Added deterministic reporting test runner output.
 - Added grouped startup, transition, failure, callback ordering, async, history, and stress tests.
 - Added bounded queue-policy coverage, including startup and `GoBack()` queue ordering cases.
+- Added drain-cycle protection coverage for self-feeding queued-event loops.
 - Added pasteable PASS/FAILED console output for review.
 - Added minimal history inspection APIs for tests and diagnostics.
 - Added configuration tests for state/transition validation and logging flags.
@@ -45,7 +47,7 @@ Initial compact U++ state machine release.
 
 ### Verified
 
-- `StateMachineCoreTest` is green at `189/189`.
+- `StateMachineCoreTest` is green at `190/190`.
 - `StateMachineGuiTest` builds successfully.
 - `statemachine/statemachine.upp` depends only on `Core`.
 
@@ -57,3 +59,4 @@ Initial compact U++ state machine release.
 - Fixed `TriggerEvent()` to reject invalid registered transitions before returning success.
 - Fixed queue draining after successful async `Start()`.
 - Fixed queue draining after successful `GoBack()` so history pop completes first.
+- Fixed self-feeding synchronous queued-event loops so they stop after the configured drain limit and report `EventQueueDrainLimitReached` without corrupting state or history.

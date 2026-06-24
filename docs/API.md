@@ -88,6 +88,7 @@ Relevant transition-time event errors:
 - `EventRejectedWhileTransitioning`
 - `EventDroppedWhileTransitioning`
 - `EventQueueFull`
+- `EventQueueDrainLimitReached`
 
 ### Logging
 
@@ -153,6 +154,24 @@ the reason.
 `QueueWhileTransitioning` is intentionally lightweight: queued `TriggerEvent()`
 names only, bounded FIFO order, no queued `TryTransition()`, no queued
 `GoBack()`, no cancellation, and no hierarchy.
+
+## Queue draining
+
+Queued events drain only after a successful transition or successful startup
+completion.
+
+`DrainQueuedEvents()` processes at most `max_queued_events` queued events in one
+synchronous drain cycle.
+
+If the drain limit is reached:
+
+- draining stops
+- remaining queued events stay queued
+- `GetLastError() == EventQueueDrainLimitReached`
+- `current`, `history`, `started`, and `transitioning` remain valid
+
+`EventQueueFull` is the enqueue/capacity error.
+`EventQueueDrainLimitReached` is the drain-cycle protection error.
 
 ## Callback order
 
@@ -233,6 +252,10 @@ after `Start()` returns `true`. During that time `IsStarted()` is `true`,
 
 If the initial `OnEnter` later fails, startup rolls back and `IsStarted()`
 becomes `false`.
+
+If startup fails after queued events were accepted under
+`QueueWhileTransitioning`, those queued events are cleared as part of startup
+rollback.
 
 Machine-owned completion callbacks are single-shot: the first `done(true/false)`
 wins and duplicate completions are ignored.
