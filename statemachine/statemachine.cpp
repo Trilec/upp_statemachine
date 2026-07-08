@@ -30,7 +30,7 @@
     - See README.md and docs/API.md for public examples and contract details.
 
     Changelog
-    - 2026-06: v0.1.0 release-prep cleanup after queueing, async rollback,
+    - 2026-06: v1.0.1 release-prep cleanup after queueing, async rollback,
       and invariant-test hardening.
 */
 #include "statemachine.h"

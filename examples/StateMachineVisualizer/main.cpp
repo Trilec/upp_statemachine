@@ -13,7 +13,7 @@
 
     Intent
     - Keep the example separate from the Core-only StateMachine package.
-    - Provide a first visual scaffold Gary can compile and incrementally harden.
+    - Provide a first visual scaffold that can be compiled and incrementally hardened.
 */
 
 #include "VisualizerApp.h"

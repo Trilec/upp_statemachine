@@ -37,7 +37,7 @@ public:
     void SetModel(VisualizerModel* model);
     void RebuildNodeCards();
     void SyncNodeCards();
-    void AddToken(const String& from, const String& to, Color c, bool interrupt = false, bool batch = false);
+    void AddToken(const String& from, const String& to, Color c, bool interrupt = false, bool batch = false, bool reverse = false);
 
     virtual void Paint(Draw& w) override;
     virtual void Layout() override;

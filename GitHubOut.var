@@ -1,2 +1,2 @@
 UPP = "E:/apps/github/upp_statemachine;E:/upp-18468/uppsrc";
-OUTPUT = "E:/apps/github/upp_statemachine/out";
+OUTPUT = "E:/apps/github/upp_statemachine/build";

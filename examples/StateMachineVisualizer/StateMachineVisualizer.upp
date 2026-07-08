@@ -19,7 +19,6 @@ file
     VisualizerApp.h,
     VisualizerApp.cpp,
     main.cpp,
-    GARY_NOTES.md;
 
 mainconfig
     "" = "GUI";

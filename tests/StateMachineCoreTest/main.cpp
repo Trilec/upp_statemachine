@@ -26,10 +26,10 @@
 
     Usage
     - Build/run with the U++ toolchain and assembly recorded for this repository.
-    - Expected v0.1.0 release baseline: StateMachineCoreTest passes 190/190.
+    - Expected v1.0.1 release baseline: StateMachineCoreTest passes 190/190.
 
     Changelog
-    - 2026-06: hardened for v0.1.0 with invariant checks, seeded sequence tests,
+    - 2026-06: hardened for v1.0.1 with invariant checks, seeded sequence tests,
       async edge cases, strict queue-policy coverage, and release baseline output.
 */
 

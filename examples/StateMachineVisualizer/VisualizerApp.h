@@ -14,7 +14,7 @@
     Intent
     - Approximate the supplied HTML mockup with a dark/lightweight U++ Ui shell.
     - Keep the core StateMachine package untouched and Core-only.
-    - Provide a clear scaffold Gary can compile, adjust, and extend.
+    - Provide a clear scaffold that can be compiled, adjusted, and extended.
 
     Thread context
     - U++ GUI thread.
@@ -25,6 +25,7 @@
 
 #include "GraphView.h"
 #include <statemachine/statemachine.h>
+#include <CtrlCore/CtrlCore.h>
 
 namespace Upp {
 
@@ -56,6 +57,11 @@ private:
     void TriggerNext();
     void TriggerQueueExample();
     void TriggerErrorExample();
+    void TickAutoFlow();
+    void UpdateAutoState();
+    void SetControlStyle();
+    int  AutoDelayMs() const;
+    String PickAutoEvent() const;
     void UpdateMetrics();
     void SyncGraph();
     String CurrentVisualNode() const;
@@ -63,6 +69,7 @@ private:
 private:
     VisualizerModel model_;
     StateMachine machine_;
+    TimeCallback auto_tick_;
 
     GraphView graph_;
     VisualLogPanel log_;

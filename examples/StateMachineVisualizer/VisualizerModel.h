@@ -16,8 +16,8 @@
     - Keep visual state separate from the StateMachine core.
     - Store grid-positioned node metadata, edge metadata, animated tokens, and
       log rows used by the GUI harness.
-    - Keep this example readable and easy for Gary to extend after the first
-      compile pass.
+    - Keep this example readable and easy to extend after the first compile
+      pass.
 
     Thread context
     - GUI thread only.
@@ -66,6 +66,7 @@ struct VisualToken : Moveable<VisualToken> {
     Color color = Color(14, 165, 233);
     bool interrupt = false;
     bool batch = false;
+    bool reverse = false;
 };
 
 struct VisualLogEntry : Moveable<VisualLogEntry> {
@@ -143,7 +144,7 @@ struct VisualizerModel {
             n->complete = on;
     }
 
-    void AddToken(const String& from, const String& to, Color c, bool interrupt = false, bool batch = false)
+    void AddToken(const String& from, const String& to, Color c, bool interrupt = false, bool batch = false, bool reverse = false)
     {
         VisualToken t;
         t.id = Format("tok-%d", ++token_counter);
@@ -152,6 +153,7 @@ struct VisualizerModel {
         t.color = c;
         t.interrupt = interrupt;
         t.batch = batch;
+        t.reverse = reverse;
         tokens.Add(t);
     }
 

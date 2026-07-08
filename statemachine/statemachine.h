@@ -37,7 +37,7 @@
     - Use Clear() to remove runtime state and configuration.
 
     Changelog
-    - 2026-06: prepared v0.1.0 compact FSM API with async transitions,
+    - 2026-06: prepared v1.0.1 compact FSM API with async transitions,
       history, GoBack(), strict event policy handling, and bounded FIFO queueing.
 */
 

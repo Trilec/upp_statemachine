@@ -5,6 +5,12 @@
 - `statemachine/statemachine.h`
 - `statemachine/statemachine.cpp`
 
+## Build output
+
+The documented UMK workflow writes generated artifacts to the repo-local
+`build/` directory via `--out-dir`. That keeps release handoffs from depending
+on the toolchain's default `out/` tree. Small mercy, really.
+
 ## Types
 
 ### `TransitionContext`

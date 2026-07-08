@@ -26,7 +26,7 @@
       test suite.
 
     Changelog
-    - 2026-06: aligned header and usage notes for v0.1.0 release preparation.
+    - 2026-06: aligned header and usage notes for v1.0.1 release preparation.
 */
 
 #include <CtrlLib/CtrlLib.h>

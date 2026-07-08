@@ -61,6 +61,9 @@ state without exposing the caller to the internal transition machinery.
 - `statemachine/` contains the reusable library package for `upp_statemachine`.
 - `examples/StateMachineGuiTest/` contains the graphical test harness.
 - `tests/StateMachineCoreTest/` contains the non-GUI core tests.
+- `build/` is the repo-local output root used by the documented UMK
+  `--out-dir` workflow. The finished `.exe` files are mirrored at the top of
+  `build/` so they are easy to find without drilling into package folders.
 
 ## Current hardening notes
 

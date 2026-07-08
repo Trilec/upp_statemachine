@@ -1,4 +1,5 @@
 #include "VisualizerApp.h"
+#include <Ui/UiTheme.h>
 
 namespace Upp {
 
@@ -89,24 +90,29 @@ VisualizerApp::VisualizerApp()
     subtitle_label_.SetInk(VizMutedInk());
     subtitle_label_.SetFont(SansSerifZ(11));
 
-    start_btn_.SetText("Start");
+    start_btn_.SetText("Restart");
     trigger_btn_.SetText("Trigger Event");
     queue_btn_.SetText("Queue Example");
     error_btn_.SetText("Error Path");
     reset_btn_.SetText("Reset");
 
+    SetControlStyle();
+
     speed_slider_.SetRange(0.25, 3.0).SetStep(0.25).SetValue(1.0).SetSizeMin(DPI(120), DPI(24));
     queue_slider_.SetRange(1, 16).SetStep(1).SetValue(8).SetSizeMin(DPI(120), DPI(24));
+    speed_slider_.SetCustomStyle(UiTheme::ResolveSlider(UiRole::Accent));
+    queue_slider_.SetCustomStyle(UiTheme::ResolveSlider(UiRole::Subtle));
 
-    start_btn_.WhenAction = THISBACK(ResetScenario);
-    trigger_btn_.WhenAction = THISBACK(TriggerNext);
-    queue_btn_.WhenAction = THISBACK(TriggerQueueExample);
-    error_btn_.WhenAction = THISBACK(TriggerErrorExample);
-    reset_btn_.WhenAction = THISBACK(ResetScenario);
+    start_btn_.WhenAction = [=] { ResetScenario(); };
+    trigger_btn_.WhenAction = [=] { TriggerNext(); };
+    queue_btn_.WhenAction = [=] { TriggerQueueExample(); };
+    error_btn_.WhenAction = [=] { TriggerErrorExample(); };
+    reset_btn_.WhenAction = [=] { ResetScenario(); };
 
     speed_slider_.WhenAction = [=] {
-        model_.AddLog("Config", Format("Speed slider scaffold set to %.2f", speed_slider_.GetValue()), "system");
+        model_.AddLog("Config", Format("Speed set to %.2f; the loop will catch up.", speed_slider_.GetValue()), "system");
         log_.Refresh();
+        auto_tick_.KillSet(AutoDelayMs(), [=] { TickAutoFlow(); });
     };
     queue_slider_.WhenAction = [=] {
         machine_.SetMaxQueuedEvents((int)queue_slider_.GetValue());
@@ -117,6 +123,7 @@ VisualizerApp::VisualizerApp()
     graph_.SetModel(&model_);
     log_.SetModel(&model_);
     UpdateMetrics();
+    ResetScenario();
 }
 
 void VisualizerApp::BuildMachine()
@@ -133,12 +140,15 @@ void VisualizerApp::BuildMachine()
     machine_.AddTransition({"queue",    "ACTIVE", "QUEUED"});
     machine_.AddTransition({"drain",    "QUEUED", "DONE"});
     machine_.AddTransition({"fail",     "ACTIVE", "ERROR"});
+    machine_.AddTransition({"recover",  "ERROR",  "IDLE"});
+    machine_.AddTransition({"restart",  "DONE",   "IDLE"});
     machine_.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
     machine_.SetMaxQueuedEvents(8);
 }
 
 void VisualizerApp::ResetScenario()
 {
+    auto_tick_.Kill();
     model_.ResetDemoGraph();
     BuildMachine();
     if(machine_.Start()) {
@@ -149,12 +159,90 @@ void VisualizerApp::ResetScenario()
         model_.AddLog("Start", machine_.GetLastErrorText(), "warning");
     }
     SyncGraph();
+    auto_tick_.Set(AutoDelayMs(), [=] { TickAutoFlow(); });
 }
 
 String VisualizerApp::CurrentVisualNode() const
 {
     String s = machine_.GetCurrent();
     return s.IsEmpty() ? "IDLE" : s;
+}
+
+int VisualizerApp::AutoDelayMs() const
+{
+    int delay = (int)(900.0 / max(0.25, speed_slider_.GetValue()));
+    return clamp(delay, 90, 1200);
+}
+
+String VisualizerApp::PickAutoEvent() const
+{
+    String from = CurrentVisualNode();
+    if(from == "IDLE")
+        return "activate";
+    if(from == "ACTIVE") {
+        switch((int)Random(4)) {
+        case 0: return "finish";
+        case 1: return "queue";
+        case 2: return "fail";
+        default: return "finish";
+        }
+    }
+    if(from == "QUEUED")
+        return "drain";
+    if(from == "ERROR")
+        return "recover";
+    if(from == "DONE")
+        return "restart";
+    return "activate";
+}
+
+void VisualizerApp::SetControlStyle()
+{
+    const UiButton::Style accent = UiTheme::ResolveButton(UiRole::Accent);
+    const UiButton::Style subtle = UiTheme::ResolveButton(UiRole::Subtle);
+    const UiButton::Style alert = UiTheme::ResolveButton(UiRole::Alert);
+
+    start_btn_.SetCustomStyle(accent);
+    trigger_btn_.SetCustomStyle(subtle);
+    queue_btn_.SetCustomStyle(subtle);
+    error_btn_.SetCustomStyle(alert);
+    reset_btn_.SetCustomStyle(subtle);
+
+}
+
+void VisualizerApp::UpdateAutoState()
+{
+    if(machine_.IsTransitioning())
+        return;
+
+    String event = PickAutoEvent();
+    String from = CurrentVisualNode();
+    if(machine_.TriggerEvent(event)) {
+        String to = CurrentVisualNode();
+        model_.SetActive(to);
+        if(to == "ERROR")
+            model_.MarkError(to, true);
+        if(from == "DONE" && to == "IDLE")
+            model_.MarkComplete("DONE", true);
+        model_.AddToken(from, to, VizCyan(), event == "fail", event == "queue", event == "recover" || event == "restart");
+        model_.AddLog("Auto", Format("%s -> %s via %s", from, to, event), "success");
+    }
+    else {
+        model_.AddLog("Auto", machine_.GetLastErrorText(), "warning");
+    }
+    SyncGraph();
+}
+
+void VisualizerApp::TickAutoFlow()
+{
+    if(!IsOpen())
+        return;
+    if(!machine_.IsStarted())
+        ResetScenario();
+    else {
+        UpdateAutoState();
+        auto_tick_.Set(AutoDelayMs(), [=] { TickAutoFlow(); });
+    }
 }
 
 void VisualizerApp::TriggerNext()
@@ -174,7 +262,7 @@ void VisualizerApp::TriggerNext()
     if(machine_.TriggerEvent(event)) {
         String to = CurrentVisualNode();
         model_.SetActive(to);
-        model_.AddToken(from, to, VizCyan());
+        model_.AddToken(from, to, VizCyan(), false, false, event == "activate" && from == "DONE");
         model_.AddLog("TriggerEvent", Format("%s -> %s via %s", from, to, event), "success");
     }
     else {
@@ -201,7 +289,7 @@ void VisualizerApp::TriggerQueueExample()
         if(VisualNodeSpec* n = model_.FindNode("QUEUED"))
             n->queued_count = machine_.GetQueuedEventCount();
         model_.AddToken("ACTIVE", "QUEUED", VizCyan());
-        model_.AddLog("Queue", "Queue scenario triggered. Gary should wire this to async queue cases next.", "system");
+        model_.AddLog("Queue", "Queue scenario triggered. Wire this to async queue cases next.", "system");
     }
     else {
         model_.AddLog("Queue", machine_.GetLastErrorText(), "warning");
@@ -222,7 +310,7 @@ void VisualizerApp::TriggerErrorExample()
         String to = CurrentVisualNode();
         model_.SetActive(to);
         model_.MarkError(to, true);
-        model_.AddToken(from, to, VizAmber(), true);
+        model_.AddToken(from, to, VizAmber(), true, false, to == "IDLE");
         model_.AddLog("Failure", "Visual error route triggered.", "warning");
     }
     else {
