@@ -18,8 +18,7 @@ file
     GraphView.cpp,
     VisualizerApp.h,
     VisualizerApp.cpp,
-    main.cpp,
-    GARY_NOTES.md;
+    main.cpp;
 
 mainconfig
     "" = "GUI";
