@@ -4,15 +4,7 @@
 
 ### Added
 
-- Added a manufacturing-flow redesign for `examples/StateMachineVisualizer` using `Ui`, `Painter`, and `Animation`.
-- Added explicit curved routes, labelled moving tokens, recycling paths, and packaging batches of five.
-- Added a clearer run/pause demo loop with manual A/B injection and review forcing.
-
-### Verified
-
-- `StateMachineCoreTest`: `190/190`
-- `StateMachineGuiTest`: builds successfully
-- `StateMachineVisualizer`: builds and launches
+- No new release items planned yet.
 
 ## v1.0.1
 
@@ -20,11 +12,13 @@
 
 - Reworked the visualizer into a manufacturing-line demo instead of the old five-node scaffold.
 - Kept the reusable StateMachine core unchanged.
+- Added a single animation clock, visible node dwell, explicit recovery routes, and clearer control labels.
 
 ### Fixed
 
 - Corrected the visualizer route model so rollback and recycling use explicit paths.
 - Updated release-facing docs and build notes for `build/`.
+- Removed the backwards-looking recycle-to-generator visual hop. Nice while it lasted.
 
 ## v0.1.0
 

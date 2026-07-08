@@ -8,7 +8,7 @@
     =========
 
     Purpose
-    - Graph surface for the manufacturing-flow visualizer.
+    - Passive graph surface for the manufacturing-flow visualizer.
 */
 
 #include "StateNodeCard.h"
@@ -33,29 +33,27 @@ private:
     struct EdgePath {
         Rect from;
         Rect to;
-        Point start;
-        Point end;
         Pointf p0;
         Pointf p1;
         Pointf p2;
         Pointf p3;
     };
 
-    void Tick();
     Rect GetNodeRect(const VisualNodeSpec& n) const;
     Rect GetNodeRectById(const String& id) const;
-    Point EdgeAnchor(const Rect& r, const Rect& other) const;
+    Pointf PortPoint(const Rect& r, EdgePort port) const;
     Pointf CubicPoint(Pointf p0, Pointf p1, Pointf p2, Pointf p3, double t) const;
     void DrawBackground(Draw& w);
     void DrawEdge(Draw& w, const VisualEdgeSpec& e);
     void DrawToken(Draw& w, const VisualToken& t);
     EdgePath MakePath(const VisualEdgeSpec& e) const;
     void DrawArrowhead(Draw& w, const EdgePath& path, Color c) const;
+    bool EdgeIsActive(const String& id) const;
+    Color EdgeColor(const VisualEdgeSpec& e) const;
 
 private:
     VisualizerModel* model_ = nullptr;
     Array<StateNodeCard> cards_;
-    bool timer_running_ = false;
 };
 
 }

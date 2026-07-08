@@ -135,6 +135,6 @@ Queueing uses a bounded FIFO list of event names only.
 
 - cancellation policy
 - hierarchical states
-- richer GUI/state-view helpers after the visualizer scaffold is compiled and validated
+- richer GUI/state-view helpers derived from the validated visualizer
 - code-generation helpers
 - UppHub packaging notes

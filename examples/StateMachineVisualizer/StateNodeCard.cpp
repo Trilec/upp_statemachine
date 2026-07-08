@@ -56,19 +56,19 @@ Color StateNodeCard::AccentColor() const
 String StateNodeCard::StatusText() const
 {
     if(node_id_ == "GEN_A")
-        return Format("A:%d", part_a_);
+        return Format("New:%d", part_a_);
     if(node_id_ == "GEN_B")
-        return Format("B:%d", part_b_);
+        return Format("New:%d", part_b_);
     if(node_id_ == "ASSEMBLY")
-        return Format("A:%d B:%d", part_a_, part_b_);
+        return Format("Wait A:%d B:%d", part_a_, part_b_);
     if(node_id_ == "QUALITY_CHECK")
         return Format("Checking:%d", assembled_);
     if(node_id_ == "QUALITY_REVIEW")
         return Format("Review:%d", review_);
     if(node_id_ == "DISASSEMBLY")
-        return Format("Reject:%d", rejected_);
+        return Format("Process:%d", rejected_);
     if(node_id_ == "PACKAGING")
-        return Format("Pack:%d/5", packaging_);
+        return Format("Buffer:%d/5", packaging_);
     if(node_id_ == "SHIPPING")
         return Format("Ship:%d", shipping_);
     return active_ ? "ACTIVE" : "IDLE";
@@ -115,8 +115,25 @@ void StateNodeCard::Paint(Draw& w)
     w.DrawRect(pill, Blend(accent, Black(), 68));
     w.DrawText(pill.left + DPI(6), pill.top + DPI(3), StatusText(), SansSerifZ(8).Bold(), White());
 
-    String count = Format("A:%d  B:%d  U:%d  R:%d  X:%d  P:%d",
-                          part_a_, part_b_, assembled_, review_, rejected_, packaging_);
+    String count;
+    if(node_id_ == "GEN_A")
+        count = Format("New:%d", part_a_);
+    else if(node_id_ == "GEN_B")
+        count = Format("New:%d", part_b_);
+    else if(node_id_ == "ASSEMBLY")
+        count = Format("Waiting A:%d  Waiting B:%d", part_a_, part_b_);
+    else if(node_id_ == "QUALITY_CHECK")
+        count = Format("Checking:%d", assembled_);
+    else if(node_id_ == "QUALITY_REVIEW")
+        count = Format("Review:%d", review_);
+    else if(node_id_ == "DISASSEMBLY")
+        count = Format("Processing:%d", rejected_);
+    else if(node_id_ == "PACKAGING")
+        count = Format("Buffer:%d / 5", packaging_);
+    else if(node_id_ == "SHIPPING")
+        count = Format("Shipments:%d", shipping_);
+    else
+        count = Format("A:%d B:%d U:%d R:%d X:%d P:%d", part_a_, part_b_, assembled_, review_, rejected_, packaging_);
     w.DrawText(r.left + DPI(10), r.bottom - DPI(18), count, MonospaceZ(8), Color(148, 163, 184));
 }
 

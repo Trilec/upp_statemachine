@@ -32,6 +32,21 @@ enum class VisualTokenKind {
     RecycledPartB
 };
 
+enum class EdgePort {
+    LeftTop,
+    LeftCenter,
+    LeftBottom,
+    RightTop,
+    RightCenter,
+    RightBottom,
+    TopLeft,
+    TopCenter,
+    TopRight,
+    BottomLeft,
+    BottomCenter,
+    BottomRight
+};
+
 struct VisualNodeSpec : Moveable<VisualNodeSpec> {
     String id;
     String title;
@@ -58,11 +73,16 @@ struct VisualEdgeSpec : Moveable<VisualEdgeSpec> {
     Color color = Color(56, 189, 248);
     bool dashed = false;
     double curve_bias = 0.45;
+    EdgePort from_port = EdgePort::RightCenter;
+    EdgePort to_port = EdgePort::LeftCenter;
+    double lane_offset = 0.0;
+    Point label_offset = Point(0, 0);
 };
 
 struct VisualToken : Moveable<VisualToken> {
     String id;
     String edge_id;
+    int work_item_id = 0;
     VisualTokenKind kind = VisualTokenKind::PartA;
     String short_label;
     double progress = 0.0;
@@ -116,24 +136,24 @@ struct VisualizerModel {
         last_fsm_error.Clear();
 
         AddNode("GEN_A",          "Generator A",        "Part source A",       "Injects A parts",      0, 0);
-        AddNode("ASSEMBLY",       "Assembly Collector",  "Queues both parts",   "Waits for one A + B",  0, 1);
-        AddNode("QUALITY_CHECK",  "Quality Check",       "Inspection gate",     "Pass or review",       0, 2);
+        AddNode("GEN_B",          "Generator B",         "Part source B",       "Injects B parts",      2, 0);
+        AddNode("ASSEMBLY",       "Assembly Collector",  "Queues both parts",   "Waits for one A + B",  1, 1);
+        AddNode("QUALITY_CHECK",  "Quality Check",       "Inspection gate",     "Pass or review",       1, 2);
+        AddNode("DISASSEMBLY",    "Disassembly",         "Recycle / split",     "Rejected units split", 2, 2);
+        AddNode("QUALITY_REVIEW", "Quality Review",      "Manual review",       "Approve or reject",    2, 3);
         AddNode("PACKAGING",      "Packaging Buffer",    "Accepted units",      "N / 5 shipment batch", 0, 4);
         AddNode("SHIPPING",       "Shipping",            "Completed units",     "Shipment leaves here", 0, 5);
-        AddNode("GEN_B",          "Generator B",         "Part source B",       "Injects B parts",      2, 0);
-        AddNode("DISASSEMBLY",    "Disassembly",         "Recycle / split",     "Rejected units split", 2, 1);
-        AddNode("QUALITY_REVIEW", "Quality Review",      "Manual review",       "Approve or reject",    2, 3);
 
-        AddEdge("gen_a_to_assembly",        "GEN_A",         "ASSEMBLY",       "Part A",       Color(56, 189, 248), false, 0.35);
-        AddEdge("gen_b_to_assembly",        "GEN_B",         "ASSEMBLY",       "Part B",       Color(45, 212, 191), false, 0.35);
-        AddEdge("assembly_to_check",        "ASSEMBLY",      "QUALITY_CHECK",  "Assembled unit", Color(34, 197, 94), false, 0.45);
-        AddEdge("check_pass_to_packaging",  "QUALITY_CHECK", "PACKAGING",      "Passed",       Color(16, 185, 129), false, 0.45);
-        AddEdge("check_review_to_quality_review", "QUALITY_CHECK", "QUALITY_REVIEW", "Needs review", Color(245, 158, 11), false, 0.45);
-        AddEdge("review_approve_to_packaging", "QUALITY_REVIEW", "PACKAGING",   "Approved",     Color(16, 185, 129), false, 0.42);
-        AddEdge("review_reject_to_disassembly", "QUALITY_REVIEW", "DISASSEMBLY", "Rejected",     Color(239, 68, 68), false, 0.42);
-        AddEdge("disassembly_to_gen_a",     "DISASSEMBLY",   "GEN_A",          "Recycle A",    Color(239, 68, 68), true, 0.25);
-        AddEdge("disassembly_to_gen_b",     "DISASSEMBLY",   "GEN_B",          "Recycle B",    Color(239, 68, 68), true, 0.25);
-        AddEdge("packaging_to_shipping",     "PACKAGING",     "SHIPPING",       "Batch of 5",   Color(124, 58, 237), false, 0.50);
+        AddEdge("gen_a_to_assembly",        "GEN_A",         "ASSEMBLY",       "Part A",       Color(56, 189, 248), false, 0.35, EdgePort::RightBottom, EdgePort::LeftTop,    0.0, Point(0, 0));
+        AddEdge("gen_b_to_assembly",        "GEN_B",         "ASSEMBLY",       "Part B",       Color(45, 212, 191), false, 0.35, EdgePort::RightTop,    EdgePort::LeftBottom, 0.0, Point(0, 0));
+        AddEdge("assembly_to_check",        "ASSEMBLY",      "QUALITY_CHECK",  "Assembled unit", Color(34, 197, 94), false, 0.45, EdgePort::RightCenter, EdgePort::LeftCenter,  0.0, Point(0, 0));
+        AddEdge("check_pass_to_packaging",  "QUALITY_CHECK", "PACKAGING",      "Passed",       Color(16, 185, 129), false, 0.45, EdgePort::RightTop,    EdgePort::LeftTop,     0.0, Point(0, 0));
+        AddEdge("check_review_to_quality_review", "QUALITY_CHECK", "QUALITY_REVIEW", "Needs review", Color(245, 158, 11), false, 0.45, EdgePort::BottomCenter, EdgePort::TopCenter,  0.0, Point(0, 0));
+        AddEdge("review_approve_to_packaging", "QUALITY_REVIEW", "PACKAGING",   "Approved",     Color(16, 185, 129), false, 0.42, EdgePort::TopCenter,   EdgePort::RightBottom, 0.0, Point(0, 0));
+        AddEdge("review_reject_to_disassembly", "QUALITY_REVIEW", "DISASSEMBLY", "Rejected",     Color(239, 68, 68), false, 0.42, EdgePort::LeftBottom,  EdgePort::RightBottom, 0.0, Point(0, 0));
+        AddEdge("disassembly_to_assembly_a",     "DISASSEMBLY",   "ASSEMBLY",     "Recovered A",  Color(239, 68, 68), true,  0.25, EdgePort::LeftTop,     EdgePort::BottomLeft, -22.0, Point(-8, -12));
+        AddEdge("disassembly_to_assembly_b",     "DISASSEMBLY",   "ASSEMBLY",     "Recovered B",  Color(239, 140, 79), true,  0.25, EdgePort::LeftBottom,  EdgePort::BottomRight, 22.0, Point(12, -12));
+        AddEdge("packaging_to_shipping",     "PACKAGING",     "SHIPPING",       "Batch of 5",   Color(124, 58, 237), false, 0.50, EdgePort::RightCenter, EdgePort::LeftCenter, 0.0, Point(0, 0));
 
         SetActive("GEN_A");
         AddLog("System", "Manufacturing flow initialized.", "system");
@@ -177,11 +197,12 @@ struct VisualizerModel {
             nodes[i].active = nodes[i].id == id;
     }
 
-    void AddToken(const String& edge_id, VisualTokenKind kind, const String& short_label, Color c, double speed = 1.0)
+    void AddToken(const String& edge_id, VisualTokenKind kind, const String& short_label, Color c, double speed = 1.0, int work_item_id = 0)
     {
         VisualToken t;
         t.id = Format("tok-%d", ++token_counter);
         t.edge_id = edge_id;
+        t.work_item_id = work_item_id;
         t.kind = kind;
         t.short_label = short_label;
         t.color = c;
@@ -230,7 +251,8 @@ private:
     }
 
     void AddEdge(const String& id, const String& from, const String& to, const String& label,
-                 Color color, bool dashed, double curve_bias)
+                 Color color, bool dashed, double curve_bias, EdgePort from_port, EdgePort to_port,
+                 double lane_offset, Point label_offset)
     {
         VisualEdgeSpec e;
         e.id = id;
@@ -240,6 +262,10 @@ private:
         e.color = color;
         e.dashed = dashed;
         e.curve_bias = curve_bias;
+        e.from_port = from_port;
+        e.to_port = to_port;
+        e.lane_offset = lane_offset;
+        e.label_offset = label_offset;
         edges.Add(e);
     }
 };
