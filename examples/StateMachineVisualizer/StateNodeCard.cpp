@@ -16,11 +16,14 @@ void StateNodeCard::SetNode(const VisualNodeSpec& spec)
 {
     node_id_ = spec.id;
     active_ = spec.active;
-    error_ = spec.error;
-    complete_ = spec.complete;
-    active_count_ = spec.active_count;
-    queued_count_ = spec.queued_count;
-    processed_count_ = spec.processed_count;
+    part_a_ = spec.part_a;
+    part_b_ = spec.part_b;
+    assembled_ = spec.assembled;
+    review_ = spec.under_review;
+    rejected_ = spec.rejected;
+    recycled_ = spec.recycled;
+    packaging_ = spec.packaging_buffer;
+    shipping_ = spec.shipping;
 
     SetTitle(spec.title);
     SetSubTitle(spec.subtitle);
@@ -31,28 +34,44 @@ void StateNodeCard::SetNode(const VisualNodeSpec& spec)
 
 Color StateNodeCard::AccentColor() const
 {
-    if(error_)
-        return Color(245, 158, 11);
-    if(complete_)
-        return Color(16, 185, 129);
-    if(queued_count_ > 0)
+    if(node_id_ == "GEN_A")
         return Color(56, 189, 248);
-    if(active_)
-        return Color(14, 165, 233);
+    if(node_id_ == "GEN_B")
+        return Color(45, 212, 191);
+    if(node_id_ == "ASSEMBLY")
+        return Color(16, 185, 129);
+    if(node_id_ == "QUALITY_CHECK")
+        return Color(245, 158, 11);
+    if(node_id_ == "QUALITY_REVIEW")
+        return Color(251, 191, 36);
+    if(node_id_ == "DISASSEMBLY")
+        return Color(239, 68, 68);
+    if(node_id_ == "PACKAGING")
+        return Color(124, 58, 237);
+    if(node_id_ == "SHIPPING")
+        return Color(16, 185, 129);
     return Color(100, 116, 139);
 }
 
 String StateNodeCard::StatusText() const
 {
-    if(error_)
-        return "ERROR";
-    if(complete_)
-        return "DONE";
-    if(queued_count_ > 0)
-        return Format("Q:%d", queued_count_);
-    if(active_)
-        return "ACTIVE";
-    return "IDLE";
+    if(node_id_ == "GEN_A")
+        return Format("A:%d", part_a_);
+    if(node_id_ == "GEN_B")
+        return Format("B:%d", part_b_);
+    if(node_id_ == "ASSEMBLY")
+        return Format("A:%d B:%d", part_a_, part_b_);
+    if(node_id_ == "QUALITY_CHECK")
+        return Format("Checking:%d", assembled_);
+    if(node_id_ == "QUALITY_REVIEW")
+        return Format("Review:%d", review_);
+    if(node_id_ == "DISASSEMBLY")
+        return Format("Reject:%d", rejected_);
+    if(node_id_ == "PACKAGING")
+        return Format("Pack:%d/5", packaging_);
+    if(node_id_ == "SHIPPING")
+        return Format("Ship:%d", shipping_);
+    return active_ ? "ACTIVE" : "IDLE";
 }
 
 void StateNodeCard::ApplyNodeLook()
@@ -92,12 +111,13 @@ void StateNodeCard::Paint(Draw& w)
     Rect r = GetSize();
     const Color accent = AccentColor();
 
-    Rect pill(r.right - DPI(62), r.top + DPI(7), r.right - DPI(8), r.top + DPI(23));
-    w.DrawRect(pill, Blend(accent, Black(), 70));
-    w.DrawText(pill.left + DPI(6), pill.top + DPI(3), StatusText(), SansSerifZ(8).Bold(), accent);
+    Rect pill(r.right - DPI(72), r.top + DPI(7), r.right - DPI(8), r.top + DPI(23));
+    w.DrawRect(pill, Blend(accent, Black(), 68));
+    w.DrawText(pill.left + DPI(6), pill.top + DPI(3), StatusText(), SansSerifZ(8).Bold(), White());
 
-    String count = Format("A:%d  Q:%d  P:%d", active_count_, queued_count_, processed_count_);
-    w.DrawText(r.left + DPI(10), r.bottom - DPI(18), count, MonospaceZ(9), Color(148, 163, 184));
+    String count = Format("A:%d  B:%d  U:%d  R:%d  X:%d  P:%d",
+                          part_a_, part_b_, assembled_, review_, rejected_, packaging_);
+    w.DrawText(r.left + DPI(10), r.bottom - DPI(18), count, MonospaceZ(8), Color(148, 163, 184));
 }
 
 }

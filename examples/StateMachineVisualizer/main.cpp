@@ -9,11 +9,11 @@
     ==================================
 
     Purpose
-    - Runnable GUI entry point for the optional animated visualizer example.
+    - Runnable GUI entry point for the optional manufacturing-flow visualizer.
 
     Intent
     - Keep the example separate from the Core-only StateMachine package.
-    - Provide a first visual scaffold that can be compiled and incrementally hardened.
+    - Launch the manufacturing-flow demo cleanly.
 */
 
 #include "VisualizerApp.h"

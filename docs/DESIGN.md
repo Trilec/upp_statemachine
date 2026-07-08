@@ -64,11 +64,11 @@ without requiring a registered reverse transition.
 - `statemachine/` contains the reusable Core-only library package.
 - `tests/StateMachineCoreTest/` contains the authoritative non-GUI regression suite.
 - `examples/StateMachineGuiTest/` contains the lightweight graphical/manual harness.
-- `examples/StateMachineVisualizer/` contains an experimental animated visualizer scaffold using `Ui`, `Painter`, and `Animation`.
+- `examples/StateMachineVisualizer/` contains an optional animated manufacturing-flow visual/manual harness using `Ui`, `Painter`, and `Animation`.
 
 The optional GUI packages do not change the dependency model of the reusable
-core package. The visualizer is not part of the accepted v0.1.0 verification
-baseline until its compile and visual pass are complete.
+core package. The visualizer stays outside the core API surface and does not
+alter the reusable library contract.
 
 ## Current hardening notes
 

@@ -1,0 +1,2 @@
+UPP = "C:/path/to/upp_statemachine;C:/path/to/uppsrc";
+OUTPUT = "C:/path/to/upp_statemachine/build";

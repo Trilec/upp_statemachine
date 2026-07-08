@@ -9,7 +9,7 @@
     =============
 
     Purpose
-    - UiTitleCard-derived visual node used by StateMachineVisualizer.
+    - UiTitleCard-derived visual node used by the manufacturing visualizer.
 
     Intent
     - Reuse the existing themed title-card surface instead of custom-painting
@@ -48,11 +48,14 @@ private:
 private:
     String node_id_;
     bool active_ = false;
-    bool error_ = false;
-    bool complete_ = false;
-    int active_count_ = 0;
-    int queued_count_ = 0;
-    int processed_count_ = 0;
+    int part_a_ = 0;
+    int part_b_ = 0;
+    int assembled_ = 0;
+    int review_ = 0;
+    int rejected_ = 0;
+    int recycled_ = 0;
+    int packaging_ = 0;
+    int shipping_ = 0;
 };
 
 }
