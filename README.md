@@ -1,6 +1,23 @@
 # upp_statemachine
 
-U++ state machine library with a GUI demo, visualizer, and core test package.
+A compact asynchronous finite state machine for Ultimate++.
+
+The reusable package is GUI-independent and depends only on `Core`. It supports
+validated state/transition setup, asynchronous enter/exit callbacks, guards,
+transition hooks, history with `GoBack()`, reset/reuse, lightweight error
+reporting, and bounded event handling while a transition is active.
+
+## Status
+
+Accepted v0.1.0 baseline:
+
+- `StateMachineCoreTest`: `190/190`
+- `StateMachineGuiTest`: builds successfully
+- `statemachine/statemachine.upp`: depends only on `Core`
+
+The newer `StateMachineVisualizer` package is an experimental GUI scaffold for
+a richer animated/manual harness. It is not part of the accepted v0.1.0 build
+baseline until its compile and visual pass are completed.
 
 ## Layout
 
@@ -11,16 +28,23 @@ upp_statemachine/
 │   ├── statemachine.h
 │   └── statemachine.cpp
 ├── examples/
-│   └── StateMachineGuiTest/
-│       ├── StateMachineGuiTest.upp
+│   ├── StateMachineGuiTest/
+│   │   ├── StateMachineGuiTest.upp
+│   │   └── main.cpp
+│   └── StateMachineVisualizer/
+│       ├── StateMachineVisualizer.upp
+│       ├── VisualizerModel.h
+│       ├── StateNodeCard.h/.cpp
+│       ├── GraphView.h/.cpp
+│       ├── VisualizerApp.h/.cpp
 │       └── main.cpp
 ├── tests/
 │   └── StateMachineCoreTest/
 │       ├── StateMachineCoreTest.upp
 │       └── main.cpp
- ├── docs/
-│   ├── DESIGN.md
-│   └── API.md
+├── docs/
+│   ├── API.md
+│   └── DESIGN.md
 ├── README.md
 ├── CHANGELOG.md
 └── LICENSE
@@ -28,70 +52,40 @@ upp_statemachine/
 
 ## Packages
 
-- `statemachine/statemachine.upp` contains the reusable library package.
-- `examples/StateMachineGuiTest/StateMachineGuiTest.upp` builds the GUI test harness.
-- `tests/StateMachineCoreTest/StateMachineCoreTest.upp` builds the console core tests.
+- `statemachine/statemachine.upp` — reusable Core-only library package.
+- `tests/StateMachineCoreTest/StateMachineCoreTest.upp` — authoritative non-GUI regression suite.
+- `examples/StateMachineGuiTest/StateMachineGuiTest.upp` — lightweight manual GUI harness and GUI build check.
+- `examples/StateMachineVisualizer/StateMachineVisualizer.upp` — experimental animated visualizer scaffold using `Ui`, `Painter`, and `Animation`.
 
-## Build
+## Core behavior
 
-Use the repo-local `build/` directory for generated artifacts:
-
-```powershell
-& 'E:/upp-18468/umk.exe' 'E:/apps/github/upp_statemachine,E:/upp-18468/uppsrc' 'tests/StateMachineCoreTest' 'E:/upp-18468/CLANGx64.bm' --out-dir 'E:/apps/github/upp_statemachine/build' -abv
-& 'E:/upp-18468/umk.exe' 'E:/apps/github/upp_statemachine,E:/upp-18468/uppsrc' 'examples/StateMachineGuiTest' 'E:/upp-18468/CLANGx64.bm' --out-dir 'E:/apps/github/upp_statemachine/build' -abv
-& 'E:/upp-18468/umk.exe' 'E:/apps/github/upp_statemachine,E:/apps/github/upp_Ui,E:/apps/github/upp_AnimationEasing,E:/upp-18468/uppsrc' 'examples/StateMachineVisualizer' 'E:/upp-18468/CLANGx64.bm' --out-dir 'E:/apps/github/upp_statemachine/build' -abv
-```
-
-The current `.var` file points `OUTPUT` at `build/`, and the CLI `--out-dir`
-switch keeps UMK from wandering off into the toolchain `out/` tree.
-The finished executables are also mirrored at the top of `build/` for easier
-finding:
-
-- `build/StateMachineCoreTest.exe`
-- `build/StateMachineGuiTest.exe`
-- `build/StateMachineVisualizer.exe`
-
-## Release Baseline
-
-- Accepted `v1.0.1` baseline
-- `StateMachineCoreTest`: `190/190`
-- `StateMachineGuiTest`: builds
-- `StateMachineVisualizer`: builds and launches
-- `statemachine/statemachine.upp`: `Core` only
-
-## Notes
-
-- The library sources live in `statemachine/`.
-- The demo and tests are split into separate U++ packages.
-- Project documentation is now concentrated in `docs/`.
-- `AddState()` and `AddTransition()` return `bool`.
+- `AddState()` and `AddTransition()` validate input and return `bool`.
 - States must be added before transitions.
-- Duplicate states and duplicate `from` + `event` transitions are rejected.
-- `Start()` and `TriggerEvent()` return `bool`.
-- `TriggerEvent()` validates source and target before it can return `true`.
-- `EventPolicy` supports:
-  - `RejectWhileTransitioning`
-  - `DropWhileTransitioning`
-  - `QueueWhileTransitioning` as a bounded FIFO `TriggerEvent()`-only queue
-- Queue capacity failures report `EventQueueFull`.
-- Drain-cycle protection reports `EventQueueDrainLimitReached`.
-- `IsStarted()` reports whether startup has been accepted and the machine owns a current initial state.
-- `Start()` treats the initial `OnEnter` as a transition phase.
-- Async completion callbacks are single-shot.
-- `TryTransition()` requires `t.from == current`.
-- `GetLastError()` and `GetLastErrorText()` report the last public failure.
-- `GoBack()` returns `bool`.
-- `Reset()` keeps configuration and clears runtime state.
-- `Clear()` clears configuration and runtime state.
-- Query helpers expose read-only existence checks and counts.
-- History inspection helpers are available for tests and diagnostics.
-- Logging is disabled by default.
-- `OnAfter` uses the exact transition object passed in.
-- Queueing is limited to queued `TriggerEvent()` event names only; queued `TryTransition()` and `GoBack()` are not supported.
-- `StateMachineGuiTest` is a GUI example and manual visual harness, not the authoritative regression suite.
-- `StateMachineVisualizer` is an optional animated visual/manual harness.
-- Transition cancellation is not implemented.
-- `true` usually means the operation was accepted or began, not that async work has finished.
+- Duplicate states and duplicate `from` + `event` transition keys are rejected.
+- `Start()`, `TriggerEvent()`, `TryTransition()`, `GoBack()`, `Reset()`, and `Clear()` return `bool`.
+- `true` generally means an operation was accepted or began; asynchronous work may still be pending.
+- `GetLastError()` and `GetLastErrorText()` expose the last public failure.
+- `Reset()` clears runtime state while preserving configuration.
+- `Clear()` clears runtime state and configuration.
+- Logging is opt-in and quiet by default.
+
+### Event handling while transitioning
+
+`EventPolicy` supports:
+
+- `RejectWhileTransitioning`
+- `DropWhileTransitioning`
+- `QueueWhileTransitioning`
+
+Queueing is intentionally limited to bounded FIFO `TriggerEvent()` event names.
+Queued `TryTransition()` and `GoBack()` operations are not supported.
+
+- queue capacity failure: `EventQueueFull`
+- synchronous drain-cycle protection: `EventQueueDrainLimitReached`
+
+The drain-cycle limit prevents self-feeding synchronous event chains from
+running indefinitely while preserving remaining queued events and valid machine
+state.
 
 ## Quickstart
 
@@ -103,57 +97,48 @@ using namespace Upp;
 
 CONSOLE_APP_MAIN
 {
-StateMachine sm;
+    StateMachine sm;
 
-if(!sm.AddState({"Idle", {}, {}}))
-    return;
-
-if(!sm.SetInitial("Idle"))
-    return;
-
-if(!sm.Start())
-    LOG(sm.GetLastErrorText());
-
+    if(!sm.AddState({"Idle", {}, {}}))
+        return;
+    if(!sm.AddState({"Working", {}, {}}))
+        return;
+    if(!sm.AddTransition({"start", "Idle", "Working"}))
+        return;
+    if(!sm.SetInitial("Idle"))
+        return;
+    if(!sm.Start()) {
+        LOG(sm.GetLastErrorText());
+        return;
+    }
+    if(!sm.TriggerEvent("start"))
+        LOG(sm.GetLastErrorText());
 }
 ```
 
-## Async Example
+## Asynchronous callbacks
 
-```cpp
-#include <Core/Core.h>
-#include <statemachine/statemachine.h>
+`OnEnter` and `OnExit` receive a single-shot `done(bool)` completion callback.
+A successful return from `Start()` or `TriggerEvent()` means the operation was
+accepted; it does not mean asynchronous work has already completed.
 
-using namespace Upp;
+The current implementation assumes same-thread, same-callback-chain use and
+does not provide internal locking. The `StateMachine` object must outlive any
+pending asynchronous completion callback.
 
-CONSOLE_APP_MAIN
-{
-StateMachine sm;
+## Documentation
 
-if(!sm.AddState({"Idle", {}, {}}))
-    return;
-if(!sm.AddState({"Working",
-    [&](StateMachine&, Function<void(bool)> done) {
-        // show work, then finish later
-        done(true);
-    },
-    {}
-}))
-    return;
-if(!sm.AddTransition({"start", "Idle", "Working"}))
-    return;
-if(!sm.SetInitial("Idle"))
-    return;
-if(!sm.Start())
-    LOG(sm.GetLastErrorText());
-if(!sm.TriggerEvent("start"))
-    LOG(sm.GetLastErrorText());
+- [`docs/API.md`](docs/API.md) — public API and exact behavioral contract.
+- [`docs/DESIGN.md`](docs/DESIGN.md) — architecture, lifecycle, boundaries, and future directions.
+- [`CHANGELOG.md`](CHANGELOG.md) — v0.1.0 release details.
 
-}
-```
+## Current boundaries
 
-`true` means the operation was accepted or began. It does not imply that any
-async `OnEnter` or `OnExit` work has already finished.
+- flat states only; hierarchical states are not implemented
+- transition cancellation is not implemented
+- queueing is event-name-only and single-threaded
+- the GUI examples are optional and do not add GUI dependencies to the core package
 
 ## License
 
-Apache License 2.0
+Apache License 2.0.
