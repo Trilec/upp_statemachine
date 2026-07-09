@@ -16,9 +16,11 @@ Accepted v1.0.1 baseline:
 - `StateMachineVisualizer`: builds and launches
 - `statemachine/statemachine.upp`: depends only on `Core`
 
-The newer `StateMachineVisualizer` package is an optional animated
-manufacturing-flow visual/manual harness using `Ui`, `Painter`, and
-`Animation`.
+The newer `StateMachineVisualizer` package is one of the example apps: an
+optional animated manufacturing-flow visual/manual harness using `Ui`,
+`Painter`, and `Animation`.
+
+![StateMachineVisualizer screenshot](./VisualizerScreenshot.jpg)
 
 ## Layout
 
@@ -56,7 +58,7 @@ upp_statemachine/
 - `statemachine/statemachine.upp` — reusable Core-only library package.
 - `tests/StateMachineCoreTest/StateMachineCoreTest.upp` — authoritative non-GUI regression suite.
 - `examples/StateMachineGuiTest/StateMachineGuiTest.upp` — lightweight manual GUI harness and GUI build check.
-- `examples/StateMachineVisualizer/StateMachineVisualizer.upp` — optional animated manufacturing-flow visual/manual harness using `Ui`, `Painter`, and `Animation`.
+- `examples/StateMachineVisualizer/StateMachineVisualizer.upp` — one of the example apps; optional animated manufacturing-flow visual/manual harness using `Ui`, `Painter`, and `Animation`.
 
 ## Core behavior
 
