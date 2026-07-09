@@ -133,7 +133,7 @@ pending asynchronous completion callback.
 
 - [`docs/API.md`](docs/API.md) — public API and exact behavioral contract.
 - [`docs/DESIGN.md`](docs/DESIGN.md) — architecture, lifecycle, boundaries, and future directions.
-- [`CHANGELOG.md`](CHANGELOG.md) — v0.1.0 release details.
+- [`CHANGELOG.md`](CHANGELOG.md) — v1.0.1 release details.
 
 ## Current boundaries
 
