@@ -136,24 +136,24 @@ struct VisualizerModel {
         last_fsm_error.Clear();
 
         AddNode("GEN_A",          "Generator A",        "Part source A",       "Injects A parts",      0, 0);
-        AddNode("GEN_B",          "Generator B",         "Part source B",       "Injects B parts",      2, 0);
         AddNode("ASSEMBLY",       "Assembly Collector",  "Queues both parts",   "Waits for one A + B",  1, 1);
         AddNode("QUALITY_CHECK",  "Quality Check",       "Inspection gate",     "Pass or review",       1, 2);
-        AddNode("DISASSEMBLY",    "Disassembly",         "Recycle / split",     "Rejected units split", 2, 2);
+        AddNode("GEN_B",          "Generator B",         "Part source B",       "Injects B parts",      2, 0);
         AddNode("QUALITY_REVIEW", "Quality Review",      "Manual review",       "Approve or reject",    2, 3);
-        AddNode("PACKAGING",      "Packaging Buffer",    "Accepted units",      "N / 5 shipment batch", 0, 4);
+        AddNode("DISASSEMBLY",    "Disassembly",         "Recycle / split",     "Rejected units split", 3, 2);
+        AddNode("PACKAGING",      "Packaging Buffer",    "Accepted units",      "N / shipment batch", 0, 4);
         AddNode("SHIPPING",       "Shipping",            "Completed units",     "Shipment leaves here", 0, 5);
 
-        AddEdge("gen_a_to_assembly",        "GEN_A",         "ASSEMBLY",       "Part A",       Color(56, 189, 248), false, 0.35, EdgePort::RightBottom, EdgePort::LeftTop,    0.0, Point(0, 0));
-        AddEdge("gen_b_to_assembly",        "GEN_B",         "ASSEMBLY",       "Part B",       Color(45, 212, 191), false, 0.35, EdgePort::RightTop,    EdgePort::LeftBottom, 0.0, Point(0, 0));
-        AddEdge("assembly_to_check",        "ASSEMBLY",      "QUALITY_CHECK",  "Assembled unit", Color(34, 197, 94), false, 0.45, EdgePort::RightCenter, EdgePort::LeftCenter,  0.0, Point(0, 0));
-        AddEdge("check_pass_to_packaging",  "QUALITY_CHECK", "PACKAGING",      "Passed",       Color(16, 185, 129), false, 0.45, EdgePort::RightTop,    EdgePort::LeftTop,     0.0, Point(0, 0));
-        AddEdge("check_review_to_quality_review", "QUALITY_CHECK", "QUALITY_REVIEW", "Needs review", Color(245, 158, 11), false, 0.45, EdgePort::BottomCenter, EdgePort::TopCenter,  0.0, Point(0, 0));
-        AddEdge("review_approve_to_packaging", "QUALITY_REVIEW", "PACKAGING",   "Approved",     Color(16, 185, 129), false, 0.42, EdgePort::TopCenter,   EdgePort::RightBottom, 0.0, Point(0, 0));
-        AddEdge("review_reject_to_disassembly", "QUALITY_REVIEW", "DISASSEMBLY", "Rejected",     Color(239, 68, 68), false, 0.42, EdgePort::LeftBottom,  EdgePort::RightBottom, 0.0, Point(0, 0));
-        AddEdge("disassembly_to_assembly_a",     "DISASSEMBLY",   "ASSEMBLY",     "Recovered A",  Color(239, 68, 68), true,  0.25, EdgePort::LeftTop,     EdgePort::BottomLeft, -22.0, Point(-8, -12));
-        AddEdge("disassembly_to_assembly_b",     "DISASSEMBLY",   "ASSEMBLY",     "Recovered B",  Color(239, 140, 79), true,  0.25, EdgePort::LeftBottom,  EdgePort::BottomRight, 22.0, Point(12, -12));
-        AddEdge("packaging_to_shipping",     "PACKAGING",     "SHIPPING",       "Batch of 5",   Color(124, 58, 237), false, 0.50, EdgePort::RightCenter, EdgePort::LeftCenter, 0.0, Point(0, 0));
+        AddEdge("gen_a_to_assembly",        "GEN_A",         "ASSEMBLY",       "Part A",       Color(56, 189, 248), false, 0.25, EdgePort::RightBottom, EdgePort::LeftTop,    -18.0, Point(-12, -8));
+        AddEdge("gen_b_to_assembly",        "GEN_B",         "ASSEMBLY",       "Part B",       Color(45, 212, 191), false, 0.25, EdgePort::RightTop,    EdgePort::LeftBottom, -18.0, Point(-12, 12));
+        AddEdge("assembly_to_check",        "ASSEMBLY",      "QUALITY_CHECK",  "Assembled unit", Color(34, 197, 94), false, 0.40, EdgePort::RightCenter, EdgePort::LeftCenter,  0.0, Point(0, -10));
+        AddEdge("check_pass_to_packaging",  "QUALITY_CHECK", "PACKAGING",      "Passed",       Color(16, 185, 129), false, 0.38, EdgePort::RightTop,    EdgePort::LeftTop,     24.0, Point(4, -12));
+        AddEdge("check_review_to_quality_review", "QUALITY_CHECK", "QUALITY_REVIEW", "Needs review", Color(245, 158, 11), false, 0.38, EdgePort::BottomCenter, EdgePort::TopCenter,  24.0, Point(6, 12));
+        AddEdge("review_approve_to_packaging", "QUALITY_REVIEW", "PACKAGING",   "Approved",     Color(16, 185, 129), false, 0.36, EdgePort::TopCenter,   EdgePort::RightBottom, -18.0, Point(8, -12));
+        AddEdge("review_reject_to_disassembly", "QUALITY_REVIEW", "DISASSEMBLY", "Rejected",     Color(239, 68, 68), false, 0.36, EdgePort::LeftBottom,  EdgePort::RightBottom, 26.0, Point(8, 10));
+        AddEdge("disassembly_to_assembly_a",     "DISASSEMBLY",   "ASSEMBLY",     "Recovered A",  Color(239, 68, 68), true,  0.25, EdgePort::LeftTop,     EdgePort::BottomLeft, -26.0, Point(-10, -12));
+        AddEdge("disassembly_to_assembly_b",     "DISASSEMBLY",   "ASSEMBLY",     "Recovered B",  Color(239, 140, 79), true,  0.25, EdgePort::LeftBottom,  EdgePort::BottomRight, 26.0, Point(12, -12));
+        AddEdge("packaging_to_shipping",     "PACKAGING",     "SHIPPING",       "Batch",        Color(124, 58, 237), false, 0.45, EdgePort::RightCenter, EdgePort::LeftCenter, 0.0, Point(0, 0));
 
         SetActive("GEN_A");
         AddLog("System", "Manufacturing flow initialized.", "system");

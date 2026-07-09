@@ -68,7 +68,7 @@ String StateNodeCard::StatusText() const
     if(node_id_ == "DISASSEMBLY")
         return Format("Process:%d", rejected_);
     if(node_id_ == "PACKAGING")
-        return Format("Buffer:%d/5", packaging_);
+        return Format("Buffer:%d", packaging_);
     if(node_id_ == "SHIPPING")
         return Format("Ship:%d", shipping_);
     return active_ ? "ACTIVE" : "IDLE";
@@ -129,7 +129,7 @@ void StateNodeCard::Paint(Draw& w)
     else if(node_id_ == "DISASSEMBLY")
         count = Format("Processing:%d", rejected_);
     else if(node_id_ == "PACKAGING")
-        count = Format("Buffer:%d / 5", packaging_);
+        count = Format("Buffer:%d", packaging_);
     else if(node_id_ == "SHIPPING")
         count = Format("Shipments:%d", shipping_);
     else

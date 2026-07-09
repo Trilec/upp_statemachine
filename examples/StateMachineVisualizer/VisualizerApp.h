@@ -59,9 +59,8 @@ private:
     void InjectPartA();
     void InjectPartB();
     void ForceReview();
-    void AdvanceScenario();
+    void ForceReject();
     void UpdateFrame();
-    void ProduceParts();
     void TryAssemble();
     void StartProcessingJob(int work_item_id, ProcessingStage stage, double seconds);
     void TickProcessing();
@@ -75,7 +74,6 @@ private:
     void UpdateMetrics();
     void SyncGraph();
     void SetControlStyle();
-    int  AutoDelayMs() const;
     String StatusText() const;
 
 private:
@@ -83,18 +81,17 @@ private:
     StateMachine control_;
     bool running_ = false;
     bool force_next_review_ = false;
+    bool force_next_reject_ = false;
     int review_probability_ = 40;
-    int rejection_probability_ = 45;
+    int reject_probability_ = 50;
+    int auto_ingest_rate_ = 4;
+    int package_size_ = 5;
     int next_work_item_id_ = 0;
     int accepted_units_ = 0;
     int shipped_units_ = 0;
     double last_tick_ms_ = 0.0;
     double generation_accumulator_ = 0.0;
-    double generator_a_accumulator_ = 0.0;
-    double generator_b_accumulator_ = 0.0;
     double flow_speed_ = 1.0;
-    double review_rate_ = 0.40;
-    double reject_rate_ = 0.45;
     Array<ProcessingJob> processing_jobs_;
     TimeCallback tick_;
 
@@ -106,18 +103,28 @@ private:
     UiButton inject_a_btn_;
     UiButton inject_b_btn_;
     UiButton force_review_btn_;
+    UiButton force_reject_btn_;
     UiButton reset_btn_;
 
     UiSlider speed_slider_;
+    UiSlider ingest_slider_;
     UiSlider review_slider_;
     UiSlider reject_slider_;
+    UiSlider package_slider_;
 
     Label title_label_;
     Label subtitle_label_;
     Label status_label_;
-    Label speed_label_;
-    Label review_label_;
-    Label reject_label_;
+    Label speed_caption_;
+    Label speed_value_;
+    Label ingest_caption_;
+    Label ingest_value_;
+    Label review_caption_;
+    Label review_value_;
+    Label reject_caption_;
+    Label reject_value_;
+    Label package_caption_;
+    Label package_value_;
     Label counters_label_;
     Label buffer_label_;
 };

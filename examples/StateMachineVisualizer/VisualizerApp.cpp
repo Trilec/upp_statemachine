@@ -57,7 +57,7 @@ void GuidePanel::Paint(Draw& w)
     w.DrawText(x, y, "U  assembled unit", SansSerifZ(10).Bold(), VizGreen()); y += DPI(16);
     w.DrawText(x, y, "R  review unit", SansSerifZ(10).Bold(), VizAmber()); y += DPI(16);
     w.DrawText(x, y, "X  rejected/recycled", SansSerifZ(10).Bold(), VizRed()); y += DPI(16);
-    w.DrawText(x, y, "5  shipment batch", SansSerifZ(10).Bold(), VizViolet());
+    w.DrawText(x, y, "N  shipment batch", SansSerifZ(10).Bold(), VizViolet());
 }
 
 VisualizerApp::VisualizerApp()
@@ -77,13 +77,23 @@ VisualizerApp::VisualizerApp()
     Add(inject_a_btn_);
     Add(inject_b_btn_);
     Add(force_review_btn_);
+    Add(force_reject_btn_);
     Add(reset_btn_);
     Add(speed_slider_);
+    Add(ingest_slider_);
     Add(review_slider_);
     Add(reject_slider_);
-    Add(speed_label_);
-    Add(review_label_);
-    Add(reject_label_);
+    Add(package_slider_);
+    Add(speed_caption_);
+    Add(speed_value_);
+    Add(ingest_caption_);
+    Add(ingest_value_);
+    Add(review_caption_);
+    Add(review_value_);
+    Add(reject_caption_);
+    Add(reject_value_);
+    Add(package_caption_);
+    Add(package_value_);
     Add(graph_);
     Add(log_);
     Add(guide_);
@@ -99,17 +109,28 @@ VisualizerApp::VisualizerApp()
     inject_a_btn_.SetText("Inject A");
     inject_b_btn_.SetText("Inject B");
     force_review_btn_.SetText("Force Review");
+    force_reject_btn_.SetText("Force Reject");
     reset_btn_.SetText("Reset");
 
     speed_slider_.SetRange(0.5, 3.0).SetStep(0.25).SetValue(1.0).SetSizeMin(DPI(120), DPI(24));
+    ingest_slider_.SetRange(0, 25).SetStep(1).SetValue(4).SetSizeMin(DPI(120), DPI(24));
     review_slider_.SetRange(0, 100).SetStep(5).SetValue(40).SetSizeMin(DPI(120), DPI(24));
-    reject_slider_.SetRange(0, 100).SetStep(5).SetValue(45).SetSizeMin(DPI(120), DPI(24));
+    reject_slider_.SetRange(0, 100).SetStep(5).SetValue(50).SetSizeMin(DPI(120), DPI(24));
+    package_slider_.SetRange(1, 20).SetStep(1).SetValue(5).SetSizeMin(DPI(120), DPI(24));
     speed_slider_.SetCustomStyle(UiTheme::ResolveSlider(UiRole::Accent));
+    ingest_slider_.SetCustomStyle(UiTheme::ResolveSlider(UiRole::Subtle));
     review_slider_.SetCustomStyle(UiTheme::ResolveSlider(UiRole::Subtle));
     reject_slider_.SetCustomStyle(UiTheme::ResolveSlider(UiRole::Alert));
-    speed_label_.SetInk(VizMutedInk());
-    review_label_.SetInk(VizMutedInk());
-    reject_label_.SetInk(VizMutedInk());
+    package_slider_.SetCustomStyle(UiTheme::ResolveSlider(UiRole::Accent));
+    for(Label* l : { &speed_caption_, &speed_value_, &ingest_caption_, &ingest_value_, &review_caption_, &review_value_, &reject_caption_, &reject_value_, &package_caption_, &package_value_ }) {
+        l->SetInk(VizMutedInk());
+        l->SetFont(SansSerifZ(10).Bold());
+    }
+    speed_value_.SetFont(MonospaceZ(10).Bold());
+    ingest_value_.SetFont(MonospaceZ(10).Bold());
+    review_value_.SetFont(MonospaceZ(10).Bold());
+    reject_value_.SetFont(MonospaceZ(10).Bold());
+    package_value_.SetFont(MonospaceZ(10).Bold());
 
     SetControlStyle();
 
@@ -121,21 +142,31 @@ VisualizerApp::VisualizerApp()
         model_.AddLog("Config", "Next quality check will be routed to review.", "system");
         SyncGraph();
     };
+    force_reject_btn_.WhenAction = [=] {
+        force_next_reject_ = true;
+        model_.AddLog("Config", "Next quality review will be rejected.", "system");
+        SyncGraph();
+    };
     reset_btn_.WhenAction = [=] { ResetScenario(); };
 
     speed_slider_.WhenAction = [=] {
-        model_.AddLog("Config", Format("Speed set to %.2f.", speed_slider_.GetValue()), "system");
-        tick_.KillSet(16, [=] { UpdateFrame(); });
+        model_.AddLog("Config", Format("Flow speed set to %.2fx.", speed_slider_.GetValue()), "system");
+    };
+    ingest_slider_.WhenAction = [=] {
+        auto_ingest_rate_ = (int)ingest_slider_.GetValue();
+        model_.AddLog("Config", Format("Auto ingest set to %d/s.", auto_ingest_rate_), "system");
     };
     review_slider_.WhenAction = [=] {
         review_probability_ = (int)review_slider_.GetValue();
-        review_rate_ = review_probability_ / 100.0;
         model_.AddLog("Config", Format("Review rate set to %d%%.", review_probability_), "system");
     };
     reject_slider_.WhenAction = [=] {
-        rejection_probability_ = (int)reject_slider_.GetValue();
-        reject_rate_ = rejection_probability_ / 100.0;
-        model_.AddLog("Config", Format("Reject rate set to %d%%.", rejection_probability_), "system");
+        reject_probability_ = (int)reject_slider_.GetValue();
+        model_.AddLog("Config", Format("Reject rate set to %d%%.", reject_probability_), "system");
+    };
+    package_slider_.WhenAction = [=] {
+        package_size_ = (int)package_slider_.GetValue();
+        model_.AddLog("Config", Format("Package size set to %d.", package_size_), "system");
     };
 
     graph_.SetModel(&model_);
@@ -167,11 +198,6 @@ void VisualizerApp::SetControlStyle()
     reset_btn_.SetCustomStyle(UiTheme::ResolveButton(UiRole::Subtle));
 }
 
-int VisualizerApp::AutoDelayMs() const
-{
-    return 16;
-}
-
 String VisualizerApp::StatusText() const
 {
     return running_ ? "Running" : "Paused";
@@ -182,17 +208,18 @@ void VisualizerApp::ResetScenario()
     tick_.Kill();
     running_ = false;
     force_next_review_ = false;
+    force_next_reject_ = false;
     review_probability_ = 40;
-    rejection_probability_ = 45;
-    review_rate_ = review_probability_ / 100.0;
-    reject_rate_ = rejection_probability_ / 100.0;
+    reject_probability_ = 50;
+    auto_ingest_rate_ = 4;
+    package_size_ = 5;
     review_slider_.SetData(40);
-    reject_slider_.SetData(45);
+    reject_slider_.SetData(50);
+    ingest_slider_.SetData(4);
+    package_slider_.SetData(5);
     flow_speed_ = 1.0;
     speed_slider_.SetData(1.0);
     generation_accumulator_ = 0.0;
-    generator_a_accumulator_ = 0.0;
-    generator_b_accumulator_ = 0.0;
     processing_jobs_.Clear();
     next_work_item_id_ = 0;
     accepted_units_ = 0;
@@ -258,6 +285,20 @@ void VisualizerApp::InjectPartB()
     model_.AddLog("Generator B", "Part B injected.", "success");
 }
 
+void VisualizerApp::ForceReview()
+{
+    force_next_review_ = true;
+    model_.AddLog("Config", "Next quality check will be routed to review.", "system");
+    SyncGraph();
+}
+
+void VisualizerApp::ForceReject()
+{
+    force_next_reject_ = true;
+    model_.AddLog("Config", "Next quality review will be rejected.", "system");
+    SyncGraph();
+}
+
 void VisualizerApp::ProcessArrival(const VisualToken& token)
 {
     const VisualEdgeSpec* e = model_.FindEdge(token.edge_id);
@@ -302,17 +343,19 @@ void VisualizerApp::ProcessArrival(const VisualToken& token)
         shipped_units_ += 5;
         model_.AddLog("Shipping", "Shipment batch completed.", "success");
     }
-    else if(token.kind == VisualTokenKind::RecycledPartA && e->to == "GEN_A") {
+    else if(token.kind == VisualTokenKind::RecycledPartA && e->to == "ASSEMBLY") {
         node->recycled++;
-        node->part_a++;
         model_.recycled_units++;
-        model_.AddLog("Generator A", "Recycled Part A returned.", "warning");
+        if(VisualNodeSpec* a = model_.FindNode("ASSEMBLY"))
+            a->part_a++;
+        model_.AddLog("Assembly", "Recovered Part A returned.", "warning");
     }
-    else if(token.kind == VisualTokenKind::RecycledPartB && e->to == "GEN_B") {
+    else if(token.kind == VisualTokenKind::RecycledPartB && e->to == "ASSEMBLY") {
         node->recycled++;
-        node->part_b++;
         model_.recycled_units++;
-        model_.AddLog("Generator B", "Recycled Part B returned.", "warning");
+        if(VisualNodeSpec* a = model_.FindNode("ASSEMBLY"))
+            a->part_b++;
+        model_.AddLog("Assembly", "Recovered Part B returned.", "warning");
     }
     else if(token.kind == VisualTokenKind::AssembledUnit && e->to == "PACKAGING") {
         if(VisualNodeSpec* p = model_.FindNode("PACKAGING")) {
@@ -320,11 +363,11 @@ void VisualizerApp::ProcessArrival(const VisualToken& token)
             model_.accepted_units_waiting++;
             accepted_units_++;
             model_.AddLog("Packaging", Format("Packaging buffer %d / 5", p->packaging_buffer), "system");
-            if(p->packaging_buffer >= 5) {
-                p->packaging_buffer -= 5;
-                model_.accepted_units_waiting = max(0, model_.accepted_units_waiting - 5);
-                SpawnManufacturingToken("packaging_to_shipping", VisualTokenKind::ShipmentBatch, "5", VizViolet(), 0.95, token.work_item_id);
-                model_.AddLog("Packaging", "Five accepted units became one shipment.", "success");
+            if(p->packaging_buffer >= package_size_) {
+                p->packaging_buffer -= package_size_;
+                model_.accepted_units_waiting = max(0, model_.accepted_units_waiting - package_size_);
+                SpawnManufacturingToken("packaging_to_shipping", VisualTokenKind::ShipmentBatch, Format("%d", package_size_), VizViolet(), 0.95, token.work_item_id);
+                model_.AddLog("Packaging", Format("%d accepted units became one shipment.", package_size_), "success");
             }
         }
     }
@@ -357,7 +400,8 @@ void VisualizerApp::ProcessReviewResult(int work_item_id)
         n->under_review--;
         model_.units_under_review = max(0, model_.units_under_review - 1);
     }
-    bool rejected = Random(100) < rejection_probability_;
+    bool rejected = force_next_reject_ || Random(100) < reject_probability_;
+    force_next_reject_ = false;
     if(rejected) {
         SpawnManufacturingToken("review_reject_to_disassembly", VisualTokenKind::RejectedUnit, "X", VizRed(), 1.0, work_item_id);
         model_.AddLog("Quality Review", Format("[Unit %d] Rejected.", work_item_id), "alert");
@@ -401,13 +445,20 @@ void VisualizerApp::UpdateFrame()
 
     if(running_) {
         flow_speed_ = max(0.5, speed_slider_.GetValue());
-        generation_accumulator_ += dt * flow_speed_;
-        if(generation_accumulator_ >= 0.80) {
-            generation_accumulator_ -= 0.80;
-            if(Random(100) < 88)
-                SpawnPart("gen_a_to_assembly", VisualTokenKind::PartA, "A", VizCyan());
-            if(Random(100) < 88)
-                SpawnPart("gen_b_to_assembly", VisualTokenKind::PartB, "B", VizTeal());
+        double interval = auto_ingest_rate_ > 0 ? 1.0 / auto_ingest_rate_ : 0.0;
+        if(interval > 0.0) {
+            generation_accumulator_ += dt * flow_speed_;
+            while(generation_accumulator_ >= interval) {
+                generation_accumulator_ -= interval;
+                if(Random(100) < 88) {
+                    SpawnPart("gen_a_to_assembly", VisualTokenKind::PartA, "A", VizCyan());
+                    model_.part_a_generated++;
+                }
+                if(Random(100) < 88) {
+                    SpawnPart("gen_b_to_assembly", VisualTokenKind::PartB, "B", VizTeal());
+                    model_.part_b_generated++;
+                }
+            }
         }
 
         for(int i = model_.tokens.GetCount() - 1; i >= 0; i--) {
@@ -471,28 +522,6 @@ void VisualizerApp::TickProcessing()
     }
 }
 
-void VisualizerApp::ProduceParts()
-{
-    generator_a_accumulator_ += 0.016 * max(0.5, speed_slider_.GetValue());
-    generator_b_accumulator_ += 0.016 * max(0.5, speed_slider_.GetValue());
-
-    while(generator_a_accumulator_ >= 0.80) {
-        generator_a_accumulator_ -= 0.80;
-        SpawnPart("gen_a_to_assembly", VisualTokenKind::PartA, "A", VizCyan());
-        model_.part_a_generated++;
-    }
-    while(generator_b_accumulator_ >= 0.84) {
-        generator_b_accumulator_ -= 0.84;
-        SpawnPart("gen_b_to_assembly", VisualTokenKind::PartB, "B", VizTeal());
-        model_.part_b_generated++;
-    }
-}
-
-void VisualizerApp::AdvanceScenario()
-{
-    UpdateFrame();
-}
-
 void VisualizerApp::UpdateNodeStats()
 {
     if(VisualNodeSpec* n = model_.FindNode("GEN_A")) {
@@ -540,11 +569,20 @@ void VisualizerApp::UpdateMetrics()
     counters_label_.SetInk(VizCyan());
     counters_label_.SetFont(MonospaceZ(11).Bold());
 
-    speed_label_.SetLabel(Format("Flow Speed  %.2fx", speed_slider_.GetValue()));
-    review_label_.SetLabel(Format("Review Rate  %d%%", review_probability_));
-    reject_label_.SetLabel(Format("Reject Rate  %d%%", rejection_probability_));
-    buffer_label_.SetLabel(Format("Packaging: %d / 5   Last error: %s",
-        model_.accepted_units_waiting,
+    speed_caption_.SetLabel("Flow Speed");
+    speed_value_.SetLabel(Format("%.1fx", speed_slider_.GetValue()));
+    ingest_caption_.SetLabel("Auto Ingest");
+    ingest_value_.SetLabel(Format("%d/s", auto_ingest_rate_));
+    review_caption_.SetLabel("Review Rate");
+    review_value_.SetLabel(Format("%d%%", review_probability_));
+    reject_caption_.SetLabel("Reject Rate");
+    reject_value_.SetLabel(Format("%d%%", reject_probability_));
+    package_caption_.SetLabel("Package Size");
+    package_value_.SetLabel(Format("%d", package_size_));
+    if(VisualEdgeSpec* e = model_.FindEdge("packaging_to_shipping"))
+        e->label = Format("Batch of %d", package_size_);
+    buffer_label_.SetLabel(Format("Packaging: %d / %d   Last error: %s",
+        model_.accepted_units_waiting, package_size_,
         model_.last_fsm_error.IsEmpty() ? String("none") : model_.last_fsm_error));
     buffer_label_.SetInk(VizMutedInk());
     buffer_label_.SetFont(MonospaceZ(10));
@@ -563,7 +601,7 @@ void VisualizerApp::Layout()
 {
     Size sz = GetSize();
     const int header_h = DPI(64);
-    const int controls_h = DPI(52);
+    const int controls_h = DPI(104);
     const int footer_h = DPI(156);
 
     title_label_.SetRect(DPI(22), DPI(10), DPI(430), DPI(24));
@@ -578,13 +616,39 @@ void VisualizerApp::Layout()
     inject_a_btn_.SetRect(x, y, DPI(88), DPI(30)); x += DPI(96);
     inject_b_btn_.SetRect(x, y, DPI(88), DPI(30)); x += DPI(96);
     force_review_btn_.SetRect(x, y, DPI(112), DPI(30)); x += DPI(120);
-    reset_btn_.SetRect(x, y, DPI(82), DPI(30)); x += DPI(92);
-    speed_label_.SetRect(x, y - DPI(14), DPI(150), DPI(14));
-    speed_slider_.SetRect(x, y + DPI(2), DPI(140), DPI(26)); x += DPI(156);
-    review_label_.SetRect(x, y - DPI(14), DPI(150), DPI(14));
-    review_slider_.SetRect(x, y + DPI(2), DPI(140), DPI(26)); x += DPI(156);
-    reject_label_.SetRect(x, y - DPI(14), DPI(150), DPI(14));
-    reject_slider_.SetRect(x, y + DPI(2), DPI(140), DPI(26));
+    force_reject_btn_.SetRect(x, y, DPI(112), DPI(30)); x += DPI(120);
+    reset_btn_.SetRect(x, y, DPI(82), DPI(30));
+
+    int row_y = header_h + DPI(48);
+    int col_x = DPI(18);
+    int col_w = DPI(226);
+    int label_w = DPI(140);
+    int value_w = DPI(70);
+    int label_h = DPI(14);
+
+    speed_caption_.SetRect(col_x, row_y, label_w, label_h);
+    speed_value_.SetRect(col_x + label_w, row_y, value_w, label_h);
+    speed_slider_.SetRect(col_x, row_y + DPI(16), DPI(150), DPI(24));
+
+    col_x += col_w;
+    ingest_caption_.SetRect(col_x, row_y, label_w, label_h);
+    ingest_value_.SetRect(col_x + label_w, row_y, value_w, label_h);
+    ingest_slider_.SetRect(col_x, row_y + DPI(16), DPI(150), DPI(24));
+
+    col_x += col_w;
+    review_caption_.SetRect(col_x, row_y, label_w, label_h);
+    review_value_.SetRect(col_x + label_w, row_y, value_w, label_h);
+    review_slider_.SetRect(col_x, row_y + DPI(16), DPI(150), DPI(24));
+
+    col_x += col_w;
+    reject_caption_.SetRect(col_x, row_y, label_w, label_h);
+    reject_value_.SetRect(col_x + label_w, row_y, value_w, label_h);
+    reject_slider_.SetRect(col_x, row_y + DPI(16), DPI(150), DPI(24));
+
+    col_x += col_w;
+    package_caption_.SetRect(col_x, row_y, label_w, label_h);
+    package_value_.SetRect(col_x + label_w, row_y, value_w, label_h);
+    package_slider_.SetRect(col_x, row_y + DPI(16), DPI(150), DPI(24));
 
     int graph_top = header_h + controls_h;
     int graph_h = max(0, sz.cy - graph_top - footer_h);
@@ -600,7 +664,7 @@ void VisualizerApp::Paint(Draw& w)
 {
     Size sz = GetSize();
     const int header_h = DPI(64);
-    const int controls_h = DPI(52);
+    const int controls_h = DPI(104);
 
     w.DrawRect(sz, VizBg());
     w.DrawRect(0, 0, sz.cx, header_h, VizHeaderBg());
