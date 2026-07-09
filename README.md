@@ -9,14 +9,14 @@ reporting, and bounded event handling while a transition is active.
 
 ## Status
 
-Accepted v1.0.1 baseline:
+The v1.0.1 baseline status:
 
 - `StateMachineCoreTest`: `190/190`
 - `StateMachineGuiTest`: builds successfully
 - `StateMachineVisualizer`: builds and launches
-- `statemachine/statemachine.upp`: depends only on `Core`
+- `statemachine/statemachine.upp`: depends only on `Core` 
 
-The newer `StateMachineVisualizer` package is one of the example apps: an
+This added `StateMachineVisualizer` package is one of the example apps: an
 optional animated manufacturing-flow visual/manual harness using `Ui`,
 `Painter`, and `Animation`.
 
