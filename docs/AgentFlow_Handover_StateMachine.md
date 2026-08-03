@@ -8,7 +8,7 @@
 - **Published HEAD verified on 2026-08-02:** `93e20f109181e16667176214484cb4f585a3d2b8`.
 - **Reported local path:** `E:\apps\github\upp_statemachine`.
 - **Purpose:** provide a deterministic, reusable, GUI-independent lifecycle engine with asynchronous enter/exit operations.
-- **Current phase:** SM-002-R3 completes lifecycle acceptance locally; supervisor review is pending.
+- **Current phase:** SM-002 implementation is complete on `feature/async-lifecycle-hardening`; supervisor acceptance of this cleanup review is pending, then merge to `main`.
 - **Boundary:** this remains a one-current-state Core-only FSM. It does not become a graph scheduler, agent runtime, GUI system, tool broker, conversation layer, or MCP component.
 
 ## 2. Roles, Workflow, and Task Standards
@@ -129,12 +129,12 @@ Strict prohibitions:
 
 | Component | Purpose | Current status | Limits |
 |---|---|---|---|
-| `statemachine` | Reusable FSM | Local SM-002-R3 | Cancellation and lifetime-safe late callbacks implemented |
-| `StateMachineCoreTest` | Authoritative regression suite | Local 224/224 | Deterministic lifecycle matrix expanded |
+| `statemachine` | Reusable FSM | Feature head `259c9fabc88f79a19862552e98bd16d1a2775390` | Core-only lifecycle hardening complete |
+| `StateMachineCoreTest` | Authoritative regression suite | Local 226/226 | Full structured result matrix and re-entrancy coverage |
 | `StateMachineGuiTest` | GUI build/manual check | Published | Not behavioural authority for core |
 | `StateMachineVisualizer` | Visual/manual harness | Published | Reference only; must not drive core design |
-| Structured settlement | Terminal async outcome | Implemented; R1 validation pending | Supervisor review |
-| Cancellation | Active transition cancellation | Implemented; R1 validation pending | Supervisor review |
+| Structured settlement | Terminal async outcome | Implemented and validated | Supervisor acceptance pending |
+| Cancellation | Active transition cancellation | Implemented and validated | Supervisor acceptance pending |
 
 ## 6. Current Verified State and Active Milestone
 
@@ -145,9 +145,12 @@ Strict prohibitions:
 - `statemachine` depends only on `Core`.
 - Current API documents structured cancellation and lifetime-safe StateMachine-supplied callbacks.
 
-### Locally reported
+### Locally verified
 
-No async-hardening implementation report or local commit has been supplied. Local worktree state is unknown.
+The feature branch contains the accepted `One<Operation>` / `Pte<Operation>` /
+`Ptr<Operation>` callback ownership, guard preflight invalidation, and stable
+queue-drain stop generation. Core validation is 226/226 under the U++ debug
+heap; GUI and Visualizer builds and Visualizer smoke launch completed in R4.
 
 ### Active milestone
 
@@ -157,9 +160,10 @@ Objective:
 
 > Add cancellation, exact-once structured settlement, stale completion protection, and lifetime-safe asynchronous callbacks without redesigning the FSM or changing its same-thread Core-only contract.
 
-Completed: v1.0.1 baseline; architecture and exact task specification; required queue/result semantics identified.
+Completed: cancellation, structured results, lifetime-safe callbacks, guards,
+queue re-entrancy, deterministic matrix, documentation, and local commits.
 
-Remaining: preflight; API/internal design; implementation for startup/transition/GoBack; deterministic test matrix; docs/changelog; local commit/report; supervisor review.
+Remaining: supervisor acceptance of this cleanup review, then merge SM-002 into `main`.
 
 Acceptance criteria:
 
@@ -186,7 +190,7 @@ Continue from: `feature/async-lifecycle-hardening` at the current local R4 revie
 | Validation | Accepted baseline / requirement |
 |---|---|
 | `StateMachineCoreTest` | Current local lifecycle suite: 226/226 |
-| New cancellation tests | Pending exit, pending enter, startup, GoBack, duplicate/stale callback, repeat cancellation |
+| New cancellation tests | Completed: startup, exit, enter, GoBack, duplicate/stale callback, repeat cancellation |
 | Lifetime tests | Completion after machine destruction must be harmless |
 | Queue tests | Retain/no auto-drain on normal cancellation; clear startup queue; stale callback cannot drain |
 | Reset/Clear tests | Reject while active; work after cancellation settles |
@@ -210,16 +214,10 @@ AgentFlowCore and runtime may begin
 
 Authoritative task source: `Trilec/upp_agentflow/docs/AgentFlow_StateMachine_Adjustments.md`.
 
-### Corrective task
+### Next action
 
-**Task ID:** `SM-002-R1`  
-**Title:** Harden asynchronous lifecycle cancellation and settlement
-
-**Current context:** asynchronous completion has explicit cancellation, exact-once settlement, and retained-callback lifetime safety.
-
-**Primary objective:** Make every asynchronous operation safely cancelable and exactly-once settled.
-
-**Why next:** real model/tool phases can outlive runs or owners; AgentFlow cannot safely depend on the FSM until stale and late callbacks are harmless.
+SM-002 has no remaining implementation task. The next action is supervisor
+acceptance and merge of `feature/async-lifecycle-hardening` into `main`.
 
 **In scope:** inspect startup, transition, enter, exit, GoBack, queue, reset, and clear paths; add monotonic operation identity; add structured terminal result and settlement callback while preserving compatibility; add `CancelActiveTransition()` or accepted equivalent; add lifetime-safe weak ownership; reject stale/duplicate completion; define normal/startup/GoBack cancellation state/history outcomes; preserve caller-owned timeout; implement queue semantics; update docs; add deterministic tests.
 

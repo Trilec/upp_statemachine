@@ -10,7 +10,7 @@
 - Preserved successful hook ordering; cancellation does not commit history or
   drain normal queued events. Timeout and side-effect compensation remain
   caller-owned.
-- Expanded deterministic Core coverage to 224 debug-heap tests and updated the
+- Expanded deterministic Core coverage to 226 debug-heap tests and updated the
   Visualizer spot-check demonstration with route-once cancellation and immutable
   shipment quantities.
 

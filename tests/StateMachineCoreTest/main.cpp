@@ -4879,25 +4879,36 @@ CONSOLE_APP_MAIN
             ctx.Check(owner == nullptr, "Settlement destruction should complete without a post-callback access");
         });
 
-        add("Structured failure and back outcomes carry exact fields", [](TestContext& ctx) {
-            Function<void(bool)> fail_exit, fail_enter, back_exit;
-            Vector<TransitionResult> results;
-            StateMachine sm;
-            sm.SetInitial("A");
-            sm.AddState({"A", [](auto&, auto d) { d(true); }, [&](auto&, auto d) { fail_exit = pick(d); }});
-            sm.AddState({"B", [&](auto&, auto d) { fail_enter = pick(d); }, [&](auto&, auto d) { back_exit = pick(d); }});
-            sm.AddTransition({"go", "A", "B"});
-            sm.WhenTransitionSettled = [&](const auto& r) { results.Add(r); };
-            sm.Start();
-            ctx.Check(results[0].operation == TransitionOperationKind::Start && results[0].outcome == TransitionOutcome::Succeeded && results[0].to == "A" && results[0].event == "__start", "Start result fields should be exact");
-            sm.TriggerEvent("go"); fail_exit(false);
-            ctx.Check(results.Top().outcome == TransitionOutcome::FailedExit && results.Top().from == "A" && results.Top().to == "B" && results.Top().event == "go", "Failed exit fields should be exact");
-            sm.TriggerEvent("go");
-            fail_exit(true);
-            fail_enter(false);
-            ctx.Check(results.Top().outcome == TransitionOutcome::FailedEnter, "Failed enter outcome should be exact");
-            sm.AddState({"C", [](auto&, auto d) { d(true); }, {}});
-            ctx.Check(sm.GetHistoryCount() == 1, "Failed transitions must not commit history");
+        add("Structured result matrix covers start transition back and cancellation", [](TestContext& ctx) {
+            auto check = [&](StateMachine& sm, const TransitionResult& r, uint64 sequence,
+                             TransitionOperationKind kind, TransitionOutcome outcome,
+                             const String& from, const String& to, const String& event,
+                             StateMachineError error, const String& current, int history, int settlements) {
+                ctx.Check(r.sequence == sequence && r.operation == kind && r.outcome == outcome && r.from == from && r.to == to && r.event == event,
+                          "Structured result fields are exact");
+                ctx.Check(!sm.HasActiveTransition() && !sm.IsTransitioning() && sm.GetLastError() == error && sm.GetCurrent() == current && sm.GetHistoryCount() == history,
+                          "Structured result leaves exact runtime state");
+                ctx.Check(settlements == 1, "Accepted operation settles exactly once");
+            };
+            auto fixture = [&](Function<void(StateMachine&, Function<void(bool)>)> enter_a,
+                               Function<void(StateMachine&, Function<void(bool)>)> exit_a,
+                               Function<void(StateMachine&, Function<void(bool)>)> enter_b,
+                               Function<void(StateMachine&, Function<void(bool)>)> exit_b,
+                               StateMachine& sm, int& settlements, TransitionResult& result) {
+                sm.SetInitial("A"); sm.AddState({"A", enter_a, exit_a}); sm.AddState({"B", enter_b, exit_b}); sm.AddTransition({"go", "A", "B"});
+                sm.WhenTransitionSettled = [&](const auto& r) { ++settlements; result = r; };
+            };
+            { StateMachine sm; int n=0; TransitionResult r; fixture([](auto&,auto d){d(true);},{},[](auto&,auto d){d(true);},{},sm,n,r); sm.Start(); check(sm,r,1,TransitionOperationKind::Start,TransitionOutcome::Succeeded,"","A","__start",StateMachineError::None,"A",1,n); }
+            { Function<void(bool)> d; StateMachine sm; int n=0; TransitionResult r; fixture([&](auto&,auto x){d=pick(x);},{},[](auto&,auto x){x(true);},{},sm,n,r); sm.Start(); d(false); check(sm,r,1,TransitionOperationKind::Start,TransitionOutcome::FailedStart,"","A","__start",StateMachineError::StartEnterFailed,"",0,n); }
+            { StateMachine sm; int n=0; TransitionResult r; fixture([](auto&,auto d){d(true);},{},[](auto&,auto d){d(true);},{},sm,n,r); sm.Start(); n=0; sm.TriggerEvent("go"); check(sm,r,2,TransitionOperationKind::Transition,TransitionOutcome::Succeeded,"A","B","go",StateMachineError::None,"B",2,n); }
+            { Function<void(bool)> d; StateMachine sm; int n=0; TransitionResult r; fixture([](auto&,auto x){x(true);},[&](auto&,auto x){d=pick(x);},[](auto&,auto x){x(true);},{},sm,n,r); sm.Start(); n=0; sm.TriggerEvent("go"); d(false); check(sm,r,2,TransitionOperationKind::Transition,TransitionOutcome::FailedExit,"A","B","go",StateMachineError::ExitFailed,"A",1,n); }
+            { Function<void(bool)> d; StateMachine sm; int n=0; TransitionResult r; fixture([](auto&,auto x){x(true);},{},[&](auto&,auto x){d=pick(x);},{},sm,n,r); sm.Start(); n=0; sm.TriggerEvent("go"); d(false); check(sm,r,2,TransitionOperationKind::Transition,TransitionOutcome::FailedEnter,"A","B","go",StateMachineError::EnterFailed,"A",1,n); }
+            { StateMachine sm; int n=0; TransitionResult r; fixture([](auto&,auto d){d(true);},{},[](auto&,auto d){d(true);},{},sm,n,r); sm.Start(); sm.TriggerEvent("go"); n=0; sm.GoBack(); check(sm,r,3,TransitionOperationKind::Back,TransitionOutcome::Succeeded,"B","A","__back",StateMachineError::None,"A",1,n); }
+            { Function<void(bool)> d; StateMachine sm; int n=0; TransitionResult r; fixture([](auto&,auto x){x(true);},{},[](auto&,auto x){x(true);},[&](auto&,auto x){d=pick(x);},sm,n,r); sm.Start(); sm.TriggerEvent("go"); n=0; sm.GoBack(); d(false); check(sm,r,3,TransitionOperationKind::Back,TransitionOutcome::FailedBack,"B","A","__back",StateMachineError::BackTransitionFailed,"B",2,n); }
+            { Function<void(bool)> d; StateMachine sm; int n=0; TransitionResult r; fixture([&](auto&,auto x){d=pick(x);},{},[](auto&,auto x){x(true);},{},sm,n,r); sm.Start(); sm.CancelActiveTransition(); check(sm,r,1,TransitionOperationKind::Start,TransitionOutcome::Cancelled,"","A","__start",StateMachineError::None,"",0,n); }
+            { Function<void(bool)> d; StateMachine sm; int n=0; TransitionResult r; fixture([](auto&,auto x){x(true);},[&](auto&,auto x){d=pick(x);},[](auto&,auto x){x(true);},{},sm,n,r); sm.Start(); n=0; sm.TriggerEvent("go"); sm.CancelActiveTransition(); check(sm,r,2,TransitionOperationKind::Transition,TransitionOutcome::Cancelled,"A","B","go",StateMachineError::None,"A",1,n); }
+            { Function<void(bool)> d; StateMachine sm; int n=0; TransitionResult r; fixture([](auto&,auto x){x(true);},{},[&](auto&,auto x){d=pick(x);},{},sm,n,r); sm.Start(); n=0; sm.TriggerEvent("go"); sm.CancelActiveTransition(); check(sm,r,2,TransitionOperationKind::Transition,TransitionOutcome::Cancelled,"A","B","go",StateMachineError::None,"A",1,n); }
+            { Function<void(bool)> d; StateMachine sm; int n=0; TransitionResult r; fixture([](auto&,auto x){x(true);},{},[](auto&,auto x){x(true);},[&](auto&,auto x){d=pick(x);},sm,n,r); sm.Start(); sm.TriggerEvent("go"); n=0; sm.GoBack(); sm.CancelActiveTransition(); check(sm,r,3,TransitionOperationKind::Back,TransitionOutcome::Cancelled,"B","A","__back",StateMachineError::None,"B",2,n); }
         });
 
         add("Guard false after reset preserves nested error and result", [](TestContext& ctx) {

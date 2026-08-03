@@ -11,7 +11,7 @@ reporting, and bounded event handling while a transition is active.
 
 The current SM-002 lifecycle-hardening status:
 
-- `StateMachineCoreTest`: `224/224` debug-heap tests
+- `StateMachineCoreTest`: `226/226` debug-heap tests
 - `StateMachineGuiTest`: builds successfully
 - `StateMachineVisualizer`: builds and launches
 - `statemachine/statemachine.upp`: depends only on `Core` 

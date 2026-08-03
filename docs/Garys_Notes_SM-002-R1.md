@@ -257,7 +257,7 @@ These behaviours require a clean rerun after the lifetime defect is fixed.
 
 R3 retains `One<Operation>` / `Pte<Operation>` / `Ptr<Operation>` completion
 ownership. Guard dispatch now validates a runtime/configuration generation
-before handling either result. The debug-heap Core suite passes 224/224 tests.
+before handling either result. The debug-heap Core suite passes 226/226 tests.
 The spot-check visualizer retains unit, sequence, forced-review decision,
 completion, and route-once state; cancellation routes the item once and a late
 completion is visibly ignored. Shipment tokens retain their batch quantity.

@@ -63,6 +63,28 @@ Controls how events are treated while a transition is already in progress.
 
 ## `StateMachine`
 
+### Execution
+
+- `Start() -> bool`
+- `TriggerEvent(const String& event) -> bool`
+- `TryTransition(const Transition& transition) -> bool`
+- `GoBack() -> bool`
+- `CancelActiveTransition() -> bool`
+
+### Lifecycle queries
+
+- `HasActiveTransition() const`
+- `GetActiveTransitionSequence() const`
+- `GetLastSettledTransitionSequence() const`
+- `GetLastTransitionOutcome() const`
+- `GetLastTransitionResult() const`
+
+### Lifecycle hooks
+
+- `WhenTransitionStarted`
+- `WhenTransitionFinished` (success only)
+- `WhenTransitionSettled` (success, failure, or cancellation; exactly once)
+
 ### Configuration
 
 - `SetInitial(const String& id) -> bool`
