@@ -1,24 +1,25 @@
-description "Animated StateMachine visualizer example";
+description "Animated StateMachine visualizer example\377";
 
 uses
-    Core,
-    Draw,
-    CtrlCore,
-    CtrlLib,
-    Painter,
-    Animation,
-    Ui,
-    statemachine;
+	Core,
+	Draw,
+	CtrlCore,
+	CtrlLib,
+	Painter,
+	Animation,
+	Ui,
+	statemachine;
 
 file
-    VisualizerModel.h,
-    StateNodeCard.h,
-    StateNodeCard.cpp,
-    GraphView.h,
-    GraphView.cpp,
-    VisualizerApp.h,
-    VisualizerApp.cpp,
-    main.cpp;
+	VisualizerModel.h,
+	StateNodeCard.h,
+	StateNodeCard.cpp,
+	GraphView.h,
+	GraphView.cpp,
+	VisualizerApp.h,
+	VisualizerApp.cpp,
+	main.cpp;
 
 mainconfig
-    "" = "GUI";
+	"" = "GUI";
+

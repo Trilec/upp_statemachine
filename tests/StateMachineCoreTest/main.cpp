@@ -55,6 +55,23 @@ struct TestContext {
     }
 };
 
+struct CallbackProbe : Pte<CallbackProbe> {
+    int calls = 0;
+};
+
+struct CallbackProbeCompletion {
+    Ptr<CallbackProbe> probe;
+
+    explicit CallbackProbeCompletion(CallbackProbe* probe) : probe(probe) {}
+
+    void operator()(bool) const {
+        if (probe)
+            ++probe->calls;
+    }
+};
+
+struct CallbackProbeOwner {};
+
 bool HasString(const Vector<String>& values, const String& needle) {
     for (int i = 0; i < values.GetCount(); ++i) {
         if (values[i] == needle)
@@ -546,6 +563,39 @@ CONSOLE_APP_MAIN
             ctx.Check(sm.Clear(), "Clear() should return true");
             ctx.Check(sm.GetStateCount() == 0, "State count should be 0 after Clear()");
             ctx.Check(sm.GetTransitionCount() == 0, "Transition count should be 0 after Clear()");
+        });
+    });
+
+    RunGroup("U++ callback observer proof", passed, failed, [&](auto add) {
+        add("One Pte Ptr and Function retain observer safely", [](TestContext& ctx) {
+            One<CallbackProbe> probe = MakeOne<CallbackProbe>();
+            Function<void(bool)> first(CallbackProbeCompletion(probe.Get()));
+            Function<void(bool)> second = first;
+            Function<void(bool)> third = second;
+            Function<void(bool)> moved = pick(third);
+            first(true); second(true); moved(true);
+            ctx.Check(probe->calls == 3, "Retained functions should call the live probe");
+            probe.Clear();
+            first(true); first(false); second(true); moved(false); moved(true);
+            first.Clear(); second.Clear(); moved.Clear();
+            ctx.Check(true, "Expired observer callbacks returned safely");
+        });
+
+        add("Function by-value completion shape preserves observer", [](TestContext& ctx) {
+            One<CallbackProbe> probe = MakeOne<CallbackProbe>();
+            Function<void(bool)> retained;
+            Function<void(CallbackProbeOwner&, Function<void(bool)>)> pass = [&](CallbackProbeOwner&, Function<void(bool)> done) {
+                retained = done;
+            };
+            CallbackProbeOwner owner;
+            Function<void(bool)> supplied(CallbackProbeCompletion(probe.Get()));
+            pass(owner, supplied);
+            retained(true);
+            ctx.Check(probe->calls == 1, "By-value completion should reach the live probe");
+            probe.Clear();
+            supplied(true); retained(false); retained(true);
+            supplied.Clear(); retained.Clear(); pass.Clear();
+            ctx.Check(true, "By-value retained completion should ignore an expired observer");
         });
     });
 
@@ -4683,11 +4733,11 @@ CONSOLE_APP_MAIN
                 sm.SetInitial("A");
                 sm.AddState({"A", [](auto&, auto d) { d(true); }, [&](auto&, auto d) { ++exits; d(true); }});
                 sm.AddState({"B", [](auto&, auto d) { d(true); }, {}});
-                sm.AddTransition({"go", "A", "B"});
-                sm.WhenTransitionStarted = [&](const auto&) {
-                    ctx.Check(sm.CancelActiveTransition(), "OnBefore setup cancellation should succeed");
+                Transition t{"go", "A", "B", {}, [&](const auto&) {
+                    ctx.Check(sm.CancelActiveTransition(), "OnBefore cancellation should succeed");
                     ctx.Check(clear ? sm.Clear() : sm.Reset(), "Reset/Clear after cancellation should succeed");
-                };
+                }};
+                sm.AddTransition(t);
                 sm.Start(); sm.TriggerEvent("go");
                 ctx.Check(exits == 0 && sm.GetCurrent().IsEmpty() && !sm.IsTransitioning(), "Early cancellation must not continue after Reset/Clear");
             }
@@ -4772,8 +4822,11 @@ CONSOLE_APP_MAIN
             raw->AddState({"A", [](auto&, auto d) { d(true); }, {}});
             raw->AddState({"B", [](auto&, auto d) { d(true); }, {}});
             raw->AddTransition({"go", "A", "B"});
-            raw->WhenTransitionSettled = [&](const auto&) { owner.reset(); };
             raw->Start();
+            raw->WhenTransitionSettled = [&](const TransitionResult& result) {
+                if (result.event == "go")
+                    owner.reset();
+            };
             raw->TriggerEvent("go");
             ctx.Check(owner == nullptr, "Settlement destruction should complete without a post-callback access");
         });
@@ -4802,6 +4855,65 @@ CONSOLE_APP_MAIN
     });
 
     RunGroup("SM-002 async lifecycle hardening", passed, failed, [&](auto add) {
+        add("Destruction from initial OnEnter is safe", [](TestContext& ctx) {
+            std::unique_ptr<StateMachine> owner(new StateMachine);
+            StateMachine* raw = owner.get();
+            raw->SetInitial("A");
+            raw->AddState({"A", [&](StateMachine&, auto) { owner.reset(); }, {}});
+            raw->Start();
+            ctx.Check(owner == nullptr, "Initial OnEnter should be able to destroy its owner");
+        });
+
+        add("Destruction from source OnExit is safe", [](TestContext& ctx) {
+            std::unique_ptr<StateMachine> owner(new StateMachine);
+            StateMachine* raw = owner.get();
+            raw->SetInitial("A");
+            raw->AddState({"A", [](auto&, auto d) { d(true); }, [&](StateMachine&, auto) { owner.reset(); }});
+            raw->AddState({"B", [](auto&, auto d) { d(true); }, {}});
+            raw->AddTransition({"go", "A", "B"});
+            raw->Start();
+            raw->TriggerEvent("go");
+            ctx.Check(owner == nullptr, "Source OnExit should be able to destroy its owner");
+        });
+
+        add("Destruction from target OnEnter is safe", [](TestContext& ctx) {
+            std::unique_ptr<StateMachine> owner(new StateMachine);
+            StateMachine* raw = owner.get();
+            raw->SetInitial("A");
+            raw->AddState({"A", [](auto&, auto d) { d(true); }, {}});
+            raw->AddState({"B", [&](StateMachine&, auto) { owner.reset(); }, {}});
+            raw->AddTransition({"go", "A", "B"});
+            raw->Start();
+            raw->TriggerEvent("go");
+            ctx.Check(owner == nullptr, "Target OnEnter should be able to destroy its owner");
+        });
+
+        add("Destruction from WhenTransitionFinished is safe", [](TestContext& ctx) {
+            std::unique_ptr<StateMachine> owner(new StateMachine);
+            StateMachine* raw = owner.get();
+            raw->SetInitial("A");
+            raw->AddState({"A", [](auto&, auto d) { d(true); }, {}});
+            raw->AddState({"B", [](auto&, auto d) { d(true); }, {}});
+            raw->AddTransition({"go", "A", "B"});
+            raw->Start();
+            raw->WhenTransitionFinished = [&](const TransitionContext&) { owner.reset(); };
+            raw->TriggerEvent("go");
+            ctx.Check(owner == nullptr, "WhenTransitionFinished should be able to destroy its owner");
+        });
+
+        add("Destruction from OnAfter is safe", [](TestContext& ctx) {
+            std::unique_ptr<StateMachine> owner(new StateMachine);
+            StateMachine* raw = owner.get();
+            raw->SetInitial("A");
+            raw->AddState({"A", [](auto&, auto d) { d(true); }, {}});
+            raw->AddState({"B", [](auto&, auto d) { d(true); }, {}});
+            Transition t{"go", "A", "B", {}, {}, [&](const TransitionContext&) { owner.reset(); }};
+            raw->AddTransition(t);
+            raw->Start();
+            raw->TriggerEvent("go");
+            ctx.Check(owner == nullptr, "OnAfter should be able to destroy its owner");
+        });
+
         add("No active cancellation is stable", [](TestContext& ctx) {
             StateMachine sm;
             ctx.Check(!sm.CancelActiveTransition(), "Idle cancellation should return false");
@@ -4996,8 +5108,8 @@ CONSOLE_APP_MAIN
                 owner->TriggerEvent("go");
                 owner.reset();
             }
-            if (exit_done) { Cout() << "  destroy exit callbacks\n"; Cout().Flush(); exit_done(true); Cout() << "  destroy exit callback complete\n"; Cout().Flush(); exit_done(false); }
-            if (enter_done) { Cout() << "  destroy enter callbacks 1\n"; enter_done(true); enter_done(false); }
+            if (exit_done) { exit_done(true); exit_done(false); }
+            if (enter_done) { enter_done(true); enter_done(false); }
             {
                 std::unique_ptr<StateMachine> owner(new StateMachine);
                 owner->SetInitial("A");
@@ -5007,7 +5119,7 @@ CONSOLE_APP_MAIN
                 owner->Start(); owner->TriggerEvent("go");
                 owner.reset();
             }
-            if (enter_done) { Cout() << "  destroy enter callbacks 2\n"; Cout().Flush(); enter_done(true); Cout() << "  destroy enter callback complete\n"; Cout().Flush(); enter_done(false); }
+            if (enter_done) { enter_done(true); enter_done(false); }
             {
                 std::unique_ptr<StateMachine> owner(new StateMachine);
                 owner->SetInitial("A");
@@ -5017,7 +5129,7 @@ CONSOLE_APP_MAIN
                 owner->Start(); owner->TriggerEvent("go"); owner->GoBack();
                 owner.reset();
             }
-            Cout() << "  destroy back callbacks\n"; Cout().Flush(); if (back_done) { back_done(true); Cout() << "  destroy back callback complete\n"; Cout().Flush(); back_done(false); }
+            if (back_done) { back_done(true); back_done(false); }
             ctx.Check(true, "Retained callbacks after destruction returned safely");
         });
 

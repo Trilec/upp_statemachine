@@ -44,6 +44,8 @@ Color StateNodeCard::AccentColor() const
         return Color(245, 158, 11);
     if(node_id_ == "QUALITY_REVIEW")
         return Color(251, 191, 36);
+    if(node_id_ == "ASYNC_MONITOR")
+        return Color(56, 189, 248);
     if(node_id_ == "DISASSEMBLY")
         return Color(239, 68, 68);
     if(node_id_ == "PACKAGING")
@@ -65,6 +67,8 @@ String StateNodeCard::StatusText() const
         return Format("Checking:%d", assembled_);
     if(node_id_ == "QUALITY_REVIEW")
         return Format("Review:%d", review_);
+    if(node_id_ == "ASYNC_MONITOR")
+        return Format("Audit:%d", assembled_);
     if(node_id_ == "DISASSEMBLY")
         return Format("Process:%d", rejected_);
     if(node_id_ == "PACKAGING")
@@ -126,6 +130,8 @@ void StateNodeCard::Paint(Draw& w)
         count = Format("Checking:%d", assembled_);
     else if(node_id_ == "QUALITY_REVIEW")
         count = Format("Review:%d", review_);
+    else if(node_id_ == "ASYNC_MONITOR")
+        count = Format("Auditing:%d", assembled_);
     else if(node_id_ == "DISASSEMBLY")
         count = Format("Processing:%d", rejected_);
     else if(node_id_ == "PACKAGING")

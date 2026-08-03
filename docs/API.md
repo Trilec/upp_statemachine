@@ -429,3 +429,9 @@ finished.
 - `GoBack()` does not require a registered reverse transition.
 - Queueing is implemented only for queued `TriggerEvent()` event names under `QueueWhileTransitioning`.
 - `CancelActiveTransition()` cancels only an active/cancellable operation. Once a terminal result is claimed, cancellation returns false and cannot replace it.
+# Callback lifetime and re-entrant destruction
+
+Completion callbacks observe the active operation through U++ `Ptr`; after the
+operation is cancelled, settled, or its machine is destroyed they do nothing.
+Hooks are copied before invocation. A hook may destroy its StateMachine, but
+client code must not use a previously saved raw machine pointer afterward.

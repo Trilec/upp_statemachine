@@ -59,13 +59,13 @@ void GraphView::Layout()
 
 Rect GraphView::GetNodeRect(const VisualNodeSpec& n) const
 {
-    const int node_w = DPI(172);
+    const int node_w = DPI(168);
     const int node_h = DPI(92);
-    const int cell_w = DPI(228);
-    const int cell_h = DPI(126);
-    const int margin_x = DPI(42);
-    const int margin_y = DPI(30);
-    return RectC(margin_x + n.col * cell_w, margin_y + n.row * cell_h, node_w, node_h);
+    const int cell_w = DPI(205);
+    const int cell_h = DPI(118);
+    const int margin_x = DPI(25);
+    const int margin_y = DPI(20);
+    return RectC(margin_x + n.col * cell_w + DPI(n.offset.x), margin_y + n.row * cell_h + DPI(n.offset.y), node_w, node_h);
 }
 
 Rect GraphView::GetNodeRectById(const String& id) const

@@ -233,12 +233,12 @@ struct TestRunner : TopWindow {
         sm.AddTransition({"go", "A", "B"});
         sm.WhenTransitionSettled = [&](const TransitionResult& result) {
             ++settlements;
-            logDisplay.Log(Format("  settled: sequence=%llu operation=%d outcome=%d", (unsigned long long)result.sequence, (int)result.operation, (int)result.outcome));
+            logDisplay.Log(Format("  settled: sequence=%lld operation=%d outcome=%d", (int64)result.sequence, (int)result.operation, (int)result.outcome));
         };
         sm.Start();
         const int history_before = sm.GetHistoryCount();
         sm.TriggerEvent("go");
-        logDisplay.Log(Format("  active sequence=%llu operation=%d", (unsigned long long)sm.GetActiveTransitionSequence(), (int)TransitionOperationKind::Transition));
+        logDisplay.Log(Format("  active sequence=%lld operation=%d", (int64)sm.GetActiveTransitionSequence(), (int)TransitionOperationKind::Transition));
         ASSERT(sm.CancelActiveTransition());
         ASSERT(sm.GetLastTransitionOutcome() == TransitionOutcome::Cancelled);
         ASSERT(sm.GetCurrent() == "A" && sm.GetHistoryCount() == history_before);

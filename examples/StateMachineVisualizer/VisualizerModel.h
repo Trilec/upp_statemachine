@@ -63,6 +63,7 @@ struct VisualNodeSpec : Moveable<VisualNodeSpec> {
     int packaging_buffer = 0;
     int shipping = 0;
     bool active = false;
+    Point offset;
 };
 
 struct VisualEdgeSpec : Moveable<VisualEdgeSpec> {
@@ -143,6 +144,9 @@ struct VisualizerModel {
         AddNode("DISASSEMBLY",    "Disassembly",         "Recycle / split",     "Rejected units split", 3, 2);
         AddNode("PACKAGING",      "Packaging Buffer",    "Accepted units",      "N / shipment batch", 0, 4);
         AddNode("SHIPPING",       "Shipping",            "Completed units",     "Shipment leaves here", 0, 5);
+        AddNode("ASYNC_MONITOR",  "Async Monitor",       "Lifecycle diagnostic", "Idle / watching",       2, 4);
+        FindNode("QUALITY_CHECK")->offset = Point(30, -30);
+        FindNode("ASYNC_MONITOR")->offset = Point(30, -10);
 
         AddEdge("gen_a_to_assembly",        "GEN_A",         "ASSEMBLY",       "Part A",       Color(56, 189, 248), false, 0.25, EdgePort::RightBottom, EdgePort::LeftTop,    -18.0, Point(-12, -8));
         AddEdge("gen_b_to_assembly",        "GEN_B",         "ASSEMBLY",       "Part B",       Color(45, 212, 191), false, 0.25, EdgePort::RightTop,    EdgePort::LeftBottom, -18.0, Point(-12, 12));
@@ -154,6 +158,9 @@ struct VisualizerModel {
         AddEdge("disassembly_to_assembly_a",     "DISASSEMBLY",   "ASSEMBLY",     "Recovered A",  Color(239, 68, 68), true,  0.25, EdgePort::LeftTop,     EdgePort::BottomLeft, -26.0, Point(-10, -12));
         AddEdge("disassembly_to_assembly_b",     "DISASSEMBLY",   "ASSEMBLY",     "Recovered B",  Color(239, 140, 79), true,  0.25, EdgePort::LeftBottom,  EdgePort::BottomRight, 26.0, Point(12, -12));
         AddEdge("packaging_to_shipping",     "PACKAGING",     "SHIPPING",       "Batch",        Color(124, 58, 237), false, 0.45, EdgePort::RightCenter, EdgePort::LeftCenter, 0.0, Point(0, 0));
+        AddEdge("check_to_async_monitor",    "QUALITY_CHECK", "ASYNC_MONITOR",  "auto check",   Color(56, 189, 248), true, 0.30, EdgePort::RightBottom, EdgePort::LeftTop, 18.0, Point(4, 8));
+        AddEdge("async_to_packaging", "ASYNC_MONITOR", "PACKAGING", "approved", Color(16, 185, 129), true, 0.30, EdgePort::TopCenter, EdgePort::BottomCenter, 0.0, Point(6, -8));
+        AddEdge("async_to_review", "ASYNC_MONITOR", "QUALITY_REVIEW", "review", Color(245, 158, 11), true, 0.30, EdgePort::LeftCenter, EdgePort::RightCenter, 0.0, Point(0, 8));
 
         SetActive("GEN_A");
         AddLog("System", "Manufacturing flow initialized.", "system");

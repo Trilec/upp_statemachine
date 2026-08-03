@@ -63,7 +63,7 @@ void GuidePanel::Paint(Draw& w)
 VisualizerApp::VisualizerApp()
 {
     Title("StateMachine Manufacturing Visualizer").Sizeable().Zoomable();
-    SetRect(0, 0, DPI(1200), DPI(780));
+    SetRect(0, 0, DPI(1250), DPI(810));
 
     BuildControlMachine();
     model_.ResetManufacturingGraph();
@@ -84,6 +84,8 @@ VisualizerApp::VisualizerApp()
     Add(review_slider_);
     Add(reject_slider_);
     Add(package_slider_);
+    Add(async_check_slider_);
+    Add(async_check_toggle_);
     Add(speed_caption_);
     Add(speed_value_);
     Add(ingest_caption_);
@@ -94,6 +96,8 @@ VisualizerApp::VisualizerApp()
     Add(reject_value_);
     Add(package_caption_);
     Add(package_value_);
+    Add(async_check_caption_);
+    Add(async_check_value_);
     Add(graph_);
     Add(log_);
     Add(guide_);
@@ -111,18 +115,21 @@ VisualizerApp::VisualizerApp()
     force_review_btn_.SetText("Force Review");
     force_reject_btn_.SetText("Force Reject");
     reset_btn_.SetText("Reset");
+    async_check_toggle_.SetText("Auto lifecycle checks");
+    async_check_toggle_.SetData(true);
 
     speed_slider_.SetRange(0.5, 3.0).SetStep(0.25).SetValue(1.0).SetSizeMin(DPI(120), DPI(24));
     ingest_slider_.SetRange(0, 25).SetStep(1).SetValue(4).SetSizeMin(DPI(120), DPI(24));
     review_slider_.SetRange(0, 100).SetStep(5).SetValue(40).SetSizeMin(DPI(120), DPI(24));
     reject_slider_.SetRange(0, 100).SetStep(5).SetValue(50).SetSizeMin(DPI(120), DPI(24));
     package_slider_.SetRange(1, 20).SetStep(1).SetValue(5).SetSizeMin(DPI(120), DPI(24));
+    async_check_slider_.SetRange(2, 10).SetStep(1).SetValue(4).SetSizeMin(DPI(120), DPI(24));
     speed_slider_.SetCustomStyle(UiTheme::ResolveSlider(UiRole::Accent));
     ingest_slider_.SetCustomStyle(UiTheme::ResolveSlider(UiRole::Subtle));
     review_slider_.SetCustomStyle(UiTheme::ResolveSlider(UiRole::Subtle));
     reject_slider_.SetCustomStyle(UiTheme::ResolveSlider(UiRole::Alert));
     package_slider_.SetCustomStyle(UiTheme::ResolveSlider(UiRole::Accent));
-    for(Label* l : { &speed_caption_, &speed_value_, &ingest_caption_, &ingest_value_, &review_caption_, &review_value_, &reject_caption_, &reject_value_, &package_caption_, &package_value_ }) {
+    for(Label* l : { &speed_caption_, &speed_value_, &ingest_caption_, &ingest_value_, &review_caption_, &review_value_, &reject_caption_, &reject_value_, &package_caption_, &package_value_, &async_check_caption_, &async_check_value_ }) {
         l->SetInk(VizMutedInk());
         l->SetFont(SansSerifZ(10).Bold());
     }
@@ -168,11 +175,13 @@ VisualizerApp::VisualizerApp()
         package_size_ = (int)package_slider_.GetValue();
         model_.AddLog("Config", Format("Package size set to %d.", package_size_), "system");
     };
+    async_check_toggle_.WhenAction = [=] { async_checks_enabled_ = (bool)async_check_toggle_.GetData(); };
 
     graph_.SetModel(&model_);
     log_.SetModel(&model_);
     UpdateMetrics();
     ResetScenario();
+    RunAsyncLifecycleDemo();
     last_tick_ms_ = (double)msecs();
     tick_.Set(16, [=] { UpdateFrame(); });
 }
@@ -187,6 +196,44 @@ void VisualizerApp::BuildControlMachine()
     control_.AddTransition({"pause", "RUNNING", "PAUSED"});
     if(!control_.Start())
         model_.AddLog("FSM", control_.GetLastErrorText(), "alert");
+}
+
+void VisualizerApp::RunAsyncLifecycleDemo()
+{
+    StateMachine demo;
+    Function<void(bool)> late_completion;
+    TransitionResult settled;
+    int settlements = 0;
+
+    demo.SetInitial("Idle");
+    demo.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
+    demo.AddState({"Idle", [](StateMachine&, Function<void(bool)> done) { done(true); },
+                   [&](StateMachine&, Function<void(bool)> done) { late_completion = done; }});
+    demo.AddState({"Working", [](StateMachine&, Function<void(bool)> done) { done(true); }, {}});
+    demo.AddTransition({"begin", "Idle", "Working"});
+    demo.WhenTransitionSettled = [&](const TransitionResult& result) {
+        ++settlements;
+        settled = result;
+    };
+
+    demo.Start();
+    demo.TriggerEvent("begin");
+    const uint64 active_sequence = demo.GetActiveTransitionSequence();
+    demo.TriggerEvent("begin"); // Demonstrates retained queue behaviour.
+    bool cancelled = demo.CancelActiveTransition();
+    late_completion(true);       // Must be stale and inert.
+
+    bool passed = cancelled && settlements == 2 && settled.sequence == active_sequence &&
+                  settled.outcome == TransitionOutcome::Cancelled && demo.GetCurrent() == "Idle" &&
+                  demo.GetQueuedEventCount() == 1;
+    model_.AddLog("Lifecycle", Format("Auto-check: sequence=%lld cancelled=%d stale completion ignored=%d queue=%d",
+        (int64)active_sequence, (int)cancelled, (int)passed, demo.GetQueuedEventCount()),
+        passed ? "success" : "alert");
+    if(VisualNodeSpec* monitor = model_.FindNode("ASYNC_MONITOR")) {
+        monitor->active = true;
+        monitor->copy = passed ? "Cancelled / stale ignored" : "Check failed";
+    }
+    async_monitor_remaining_ = 0.9;
 }
 
 void VisualizerApp::SetControlStyle()
@@ -220,6 +267,10 @@ void VisualizerApp::ResetScenario()
     flow_speed_ = 1.0;
     speed_slider_.SetData(1.0);
     generation_accumulator_ = 0.0;
+    async_check_accumulator_ = 0.0;
+    async_monitor_remaining_ = 0.0;
+    async_checks_enabled_ = true;
+    async_check_toggle_.SetData(true);
     processing_jobs_.Clear();
     next_work_item_id_ = 0;
     accepted_units_ = 0;
@@ -325,6 +376,11 @@ void VisualizerApp::ProcessArrival(const VisualToken& token)
         StartProcessingJob(token.work_item_id, ProcessingStage::QualityCheck, 0.80);
         model_.AddLog("Quality Check", "Assembled unit arrived for inspection.", "system");
     }
+    else if(token.kind == VisualTokenKind::AssembledUnit && e->to == "ASYNC_MONITOR") {
+        node->assembled++;
+        StartProcessingJob(token.work_item_id, ProcessingStage::AsyncMonitor, 1.20);
+        model_.AddLog("Async Monitor", Format("[Unit %d] Sampled for asynchronous audit.", token.work_item_id), "system");
+    }
     else if(token.kind == VisualTokenKind::ReviewUnit && e->to == "QUALITY_REVIEW") {
         node->under_review++;
         model_.units_under_review++;
@@ -381,6 +437,12 @@ void VisualizerApp::ProcessCheckResult(int work_item_id, bool force_review)
         n->assembled--;
         model_.units_checking = max(0, model_.units_checking - 1);
     }
+    bool sampled = async_checks_enabled_ && Random(100) < 30;
+    if(sampled) {
+        SpawnManufacturingToken("check_to_async_monitor", VisualTokenKind::AssembledUnit, "U", VizCyan(), 0.85, work_item_id);
+        model_.AddLog("Quality Check", Format("[Unit %d] Sent to Async Monitor.", work_item_id), "system");
+        return;
+    }
     bool review = force_review || Random(100) < review_probability_;
     if(review) {
         SpawnManufacturingToken("check_review_to_quality_review", VisualTokenKind::ReviewUnit, "R", VizAmber(), 1.0, work_item_id);
@@ -400,6 +462,8 @@ void VisualizerApp::ProcessReviewResult(int work_item_id)
         n->under_review--;
         model_.units_under_review = max(0, model_.units_under_review - 1);
     }
+    if(VisualNodeSpec* n = model_.FindNode("ASYNC_MONITOR"))
+        n->active = n->assembled > 0 || async_monitor_remaining_ > 0.0;
     bool rejected = force_next_reject_ || Random(100) < reject_probability_;
     force_next_reject_ = false;
     if(rejected) {
@@ -481,6 +545,22 @@ void VisualizerApp::UpdateFrame()
         TryAssemble();
     }
 
+    if(async_monitor_remaining_ > 0.0) {
+        async_monitor_remaining_ -= dt;
+        if(async_monitor_remaining_ <= 0.0)
+            if(VisualNodeSpec* monitor = model_.FindNode("ASYNC_MONITOR")) {
+                monitor->active = false;
+                monitor->copy = "Idle / watching";
+            }
+    }
+    if(async_checks_enabled_) {
+        async_check_accumulator_ += dt;
+        if(async_check_accumulator_ >= async_check_slider_.GetValue()) {
+            async_check_accumulator_ = 0.0;
+            RunAsyncLifecycleDemo();
+        }
+    }
+
     UpdateNodeStats();
     SyncGraph();
     tick_.Set(16, [=] { UpdateFrame(); });
@@ -513,6 +593,18 @@ void VisualizerApp::TickProcessing()
             break;
         case ProcessingStage::QualityReview:
             ProcessReviewResult(job.work_item_id);
+            break;
+        case ProcessingStage::AsyncMonitor:
+            if(VisualNodeSpec* n = model_.FindNode("ASYNC_MONITOR"))
+                n->assembled = max(0, n->assembled - 1);
+            if(Random(100) < 78) {
+                SpawnManufacturingToken("async_to_packaging", VisualTokenKind::AssembledUnit, "U", VizGreen(), 0.9, job.work_item_id);
+                model_.AddLog("Async Monitor", Format("[Unit %d] Approved for packaging.", job.work_item_id), "success");
+            }
+            else {
+                SpawnManufacturingToken("async_to_review", VisualTokenKind::ReviewUnit, "R", VizAmber(), 0.9, job.work_item_id);
+                model_.AddLog("Async Monitor", Format("[Unit %d] Escalated to quality review.", job.work_item_id), "warning");
+            }
             break;
         case ProcessingStage::Disassembly:
             ProcessDisassemblyResult(job.work_item_id);
@@ -579,6 +671,8 @@ void VisualizerApp::UpdateMetrics()
     reject_value_.SetLabel(Format("%d%%", reject_probability_));
     package_caption_.SetLabel("Package Size");
     package_value_.SetLabel(Format("%d", package_size_));
+    async_check_caption_.SetLabel("Lifecycle interval");
+    async_check_value_.SetLabel(Format("%.0fs", async_check_slider_.GetValue()));
     if(VisualEdgeSpec* e = model_.FindEdge("packaging_to_shipping"))
         e->label = Format("Batch of %d", package_size_);
     buffer_label_.SetLabel(Format("Packaging: %d / %d   Last error: %s",
@@ -649,6 +743,11 @@ void VisualizerApp::Layout()
     package_caption_.SetRect(col_x, row_y, label_w, label_h);
     package_value_.SetRect(col_x + label_w, row_y, value_w, label_h);
     package_slider_.SetRect(col_x, row_y + DPI(16), DPI(150), DPI(24));
+
+    async_check_toggle_.SetRect(DPI(640), y, DPI(190), DPI(30));
+    async_check_caption_.SetRect(DPI(1015), row_y, DPI(150), label_h);
+    async_check_value_.SetRect(DPI(1160), row_y, DPI(60), label_h);
+    async_check_slider_.SetRect(DPI(1015), row_y + DPI(16), DPI(150), DPI(24));
 
     int graph_top = header_h + controls_h;
     int graph_h = max(0, sz.cy - graph_top - footer_h);

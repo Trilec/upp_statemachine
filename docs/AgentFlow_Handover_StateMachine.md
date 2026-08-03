@@ -298,3 +298,9 @@ deterministic Core regression matrix.
 ## 10. New-Session Directives
 
 Read the entire handover first. Inspect live GitHub and the local worktree, compare them with the verified HEAD, and tell Curt briefly whether the handover remains current. Continue from `SM-002`; do not restart architecture planning. Review the complete implementation before acceptance or AgentFlow integration. Preserve the Core-only, same-thread, one-current-state design. Do not ask Curt to repeat contained information. Never instruct the implementer to push. Do not add graphs, timers, threads, GUI, agent types, conversation, or MCP because they may be useful elsewhere. Update AgentFlow documentation if an accepted integration contract changes.
+# SM-002-R1A status
+
+The retained-callback heap failure was traced to an invalid destruction test that
+called a saved raw `StateMachine*` after startup settlement had destroyed its
+owner. The corrected test and isolated U++ `One/Pte/Ptr/Function` proof pass;
+the debug-heap core suite completes at 218/218. See `Garys_Notes_SM-002-R1.md`.

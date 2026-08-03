@@ -1,6 +1,70 @@
 # Gary's notes — SM-002-R1 callback-lifetime failure
 
-## Review requested
+## Resolution (SM-002-R1A)
+
+The debug-heap corruption was caused by an invalid test, not by the retained
+completion observer. `Settlement callback may destroy its owner` originally
+installed `WhenTransitionSettled` before synchronous `Start()`. Startup
+settlement destroyed the `StateMachine`; the test then called `raw->TriggerEvent`
+through that dangling pointer. The debug heap detected the resulting prior write
+on allocation of the following test's machine.
+
+The test now starts synchronously first, installs a settlement callback that
+destroys the owner only for event `go`, triggers `go`, and never touches `raw`
+afterward. The normal U++ debug-heap core run completes cleanly.
+
+The isolated proof in `StateMachineCoreTest` also passes: `One<Pte<T>>`,
+`Ptr<T>`, copied/picked `Function<void(bool)>`, and the by-value completion
+argument shape all safely ignore callbacks after the observed object is cleared.
+
+Final observer shape:
+
+```text
+StateMachine owns One<Operation>
+Operation derives Pte<Operation>
+Completion functor contains Ptr<Operation> + callback phase
+```
+
+`Operation` is released during cancellation, settlement, and destruction, so a
+retained completion observes null and does nothing. A separate `One<Lifetime>` /
+`Ptr<Lifetime>` guards code after user hooks. The destructor first nulls the
+lifetime owner, then clears the active operation and lifetime record. User hooks
+are copied to local `Function` values before invocation; ordinary U++
+`Function::operator()` does not self-retain, so caller-owned callback storage and
+captures remain caller-owned.
+
+Validated after the correction: debug-heap core suite `218/218`,
+`StateMachineGuiTest` build, and `StateMachineVisualizer` build plus launch.
+
+## Visualizer and UI follow-up
+
+The Visualizer now includes a non-core demonstration of the lifecycle work:
+
+- an automatic periodic lifecycle check with an enable toggle and interval slider;
+- an `Async Monitor` diagnostic/inspection node with dotted routes;
+- sampled Quality Check units enter that node, then asynchronously route either
+  to Packaging or to Quality Review; and
+- the Manufacturing Log records cancellation, stale-completion rejection, and
+  monitor approval/escalation outcomes.
+
+This is example-only code; the reusable StateMachine package remains Core-only
+and contains no UI, timer, worker, graph, or workflow dependency.
+
+While testing node interaction, an independent `upp_Ui` bug was found in
+`UiTitleCard::CancelMode`. It called `ReleaseCapture`, while U++ itself calls
+`CancelMode` from `ReleaseCapture`, causing recursive/nested release and an
+invalid capture-control access. The fix makes `CancelMode` state-only: it clears
+the pressed/capture flags and leaves capture release to the caller/framework.
+The Visualizer rebuilt after that fix and node clicking no longer recurses.
+
+## Remaining validation note
+
+The normal U++ debug-heap core run is the authoritative completed validation.
+An AddressSanitizer CLANGx64 run was not performed in this local pass because no
+confirmed U++ CLANGx64 ASan build configuration/link flags were available; it
+remains a recommended follow-up rather than a substituted result.
+
+## Original review request and investigation record
 
 Please review the asynchronous completion-callback ownership design in
 `statemachine/statemachine.h` and `statemachine/statemachine.cpp`, with special
@@ -154,4 +218,3 @@ These behaviours require a clean rerun after the lifetime defect is fixed.
    `upp_animation` and `upp_Ui` source locations.
 5. Review all changed implementation/tests/docs and update README, API, DESIGN,
    CHANGELOG, and the handover notes accurately.
-

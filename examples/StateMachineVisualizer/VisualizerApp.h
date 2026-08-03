@@ -38,6 +38,7 @@ public:
         Assembly,
         QualityCheck,
         QualityReview,
+        AsyncMonitor,
         Disassembly
     };
 
@@ -54,6 +55,7 @@ public:
 
 private:
     void BuildControlMachine();
+    void RunAsyncLifecycleDemo();
     void ResetScenario();
     void ToggleRunPause();
     void InjectPartA();
@@ -92,6 +94,9 @@ private:
     double last_tick_ms_ = 0.0;
     double generation_accumulator_ = 0.0;
     double flow_speed_ = 1.0;
+    double async_check_accumulator_ = 0.0;
+    double async_monitor_remaining_ = 0.0;
+    bool async_checks_enabled_ = true;
     Array<ProcessingJob> processing_jobs_;
     TimeCallback tick_;
 
@@ -111,6 +116,8 @@ private:
     UiSlider review_slider_;
     UiSlider reject_slider_;
     UiSlider package_slider_;
+    UiSlider async_check_slider_;
+    UiCheckBox async_check_toggle_;
 
     Label title_label_;
     Label subtitle_label_;
@@ -125,6 +132,8 @@ private:
     Label reject_value_;
     Label package_caption_;
     Label package_value_;
+    Label async_check_caption_;
+    Label async_check_value_;
     Label counters_label_;
     Label buffer_label_;
 };

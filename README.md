@@ -156,3 +156,9 @@ Generated files belong under `build/`.
 ## License
 
 Apache License 2.0.
+# Callback lifetime note
+
+StateMachine-provided `done(bool)` callbacks may be retained and invoked after
+cancellation, settlement, reset, clear, or StateMachine destruction; stale
+callbacks are ignored. This is a same-thread/same-callback-chain contract.
+Caller-owned callback storage and captures remain caller-owned.

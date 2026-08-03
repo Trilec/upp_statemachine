@@ -105,6 +105,8 @@ StateMachine::StateMachine() : lifetime(MakeOne<Lifetime>()) {
 }
 
 StateMachine::~StateMachine() {
+    if (lifetime)
+        lifetime->owner = nullptr;
     active_operation.Clear();
     lifetime.Clear();
 }
@@ -234,18 +236,18 @@ void StateMachine::CompleteOperation(Operation* op, CallbackPhase phase, bool su
         transitionHistory.Pop();
     ClearError();
 
+    Ptr<Lifetime> finished_lifetime(lifetime.Get());
     auto finished_callback = WhenTransitionFinished;
     if (finished_callback)
         finished_callback(ctx);
-    Ptr<Lifetime> life(lifetime.Get());
-    StateMachine* owner = life ? life->owner : nullptr;
+    StateMachine* owner = finished_lifetime ? finished_lifetime->owner : nullptr;
     if (!owner || !owner->IsClaimed(op))
         return;
+    Ptr<Lifetime> after_lifetime(owner->lifetime.Get());
     auto after_callback = op->on_after;
     if (after_callback)
         after_callback(ctx);
-    life = Ptr<Lifetime>(owner->lifetime.Get());
-    owner = life ? life->owner : nullptr;
+    owner = after_lifetime ? after_lifetime->owner : nullptr;
     if (!owner || !owner->IsClaimed(op))
         return;
     owner->ClearError();
