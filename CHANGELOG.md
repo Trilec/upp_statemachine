@@ -1,5 +1,10 @@
 # Changelog
 
+## Next
+
+- Added explicit async cancellation, structured settlement, monotonic sequences, stale-completion rejection, and destruction-safe callbacks.
+- Preserved successful hook ordering and queue behavior; timeout and external-side-effect ownership remain with callers.
+
 ## Unreleased
 
 ### Added

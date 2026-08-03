@@ -13,6 +13,10 @@ on the toolchain's default output tree. Small mercy, really.
 
 ## Types
 
+## Asynchronous lifecycle
+
+`TransitionResult` reports sequence, operation kind, outcome, and from/to/event identifiers. `WhenTransitionSettled` fires once for each accepted operation; `WhenTransitionFinished` and `OnAfter` remain success-only. `CancelActiveTransition()` returns false with `NoActiveTransition` when idle. Late and repeated completions are harmless after cancellation, reset, clear, newer work, or destruction. Timeout policy remains caller-owned; this is a same-thread, non-thread-safe API.
+
 ### `TransitionContext`
 
 Carries the live transition data into callbacks.

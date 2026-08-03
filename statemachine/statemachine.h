@@ -44,6 +44,7 @@
 #pragma once
 
 #include <Core/Core.h>
+#include <memory>
 
 namespace Upp {
 
@@ -72,6 +73,16 @@ namespace Upp {
 		EventDroppedWhileTransitioning,
 		EventQueueFull,
 		EventQueueDrainLimitReached,
+		NoActiveTransition,
+	};
+
+	enum class TransitionOutcome { None, Succeeded, FailedExit, FailedEnter, FailedStart, FailedBack, Cancelled };
+	enum class TransitionOperationKind { None, Start, Transition, Back };
+	struct TransitionResult {
+		uint64 sequence = 0;
+		TransitionOperationKind operation = TransitionOperationKind::None;
+		TransitionOutcome outcome = TransitionOutcome::None;
+		String from, to, event;
 	};
 
 	// Only TriggerEvent() participates in queueing under QueueWhileTransitioning.
@@ -201,6 +212,12 @@ namespace Upp {
 	
 	    /// True if an async transition is in progress
 	    bool IsTransitioning() const             { return transitioning; }
+	    bool CancelActiveTransition();
+	    bool HasActiveTransition() const { return active_operation != nullptr; }
+    uint64 GetActiveTransitionSequence() const;
+    uint64 GetLastSettledTransitionSequence() const { return last_result.sequence; }
+    TransitionOutcome GetLastTransitionOutcome() const { return last_result.outcome; }
+    const TransitionResult& GetLastTransitionResult() const { return last_result; }
 	
 	    /// True if you can call GoBack()
 	    bool CanGoBack() const                   { return transitionHistory.GetCount() > 1; }
@@ -234,6 +251,7 @@ namespace Upp {
 	
 	    /// Called just after any transition completes
 	    Function<void(const TransitionContext&)> WhenTransitionFinished;
+	    Function<void(const TransitionResult&)> WhenTransitionSettled;
 	
 	    /// Dump history to LOG()
 	    void DumpHistory() const {
@@ -248,9 +266,9 @@ namespace Upp {
 	    const State*       FindState(const String& id) const;
 	    const Transition*  FindTransition(const String& from, const String& ev) const;
 	
-	    bool DoTransition(const Transition& t,
-	                      bool record = true,
-	                      Function<void(bool)> on_done = {});
+	    struct Operation;
+	    bool DoTransition(const Transition& t, bool record = true, TransitionOperationKind kind = TransitionOperationKind::Transition);
+	    void Settle(const std::shared_ptr<Operation>& op, TransitionOutcome outcome, bool success);
 	    bool QueueEvent(const String& e);
 	    void DrainQueuedEvents();
 	
@@ -270,6 +288,10 @@ namespace Upp {
 	    Vector<String> queued_events;
 	    int max_queued_events = 64;
 	    StateMachineError last_error = StateMachineError::None;
+	    std::shared_ptr<Operation> active_operation;
+	    TransitionResult last_result;
+	    uint64 next_sequence = 0;
+	    std::shared_ptr<void> lifetime = std::make_shared<int>(0);
 	};
 
 } // namespace Upp

@@ -62,6 +62,10 @@ upp_statemachine/
 
 ## Core behavior
 
+### Async lifecycle hardening (v1.1)
+
+Asynchronous operations use an explicit lifecycle, monotonic sequence, and exact-once structured settlement. `CancelActiveTransition()` is caller-owned cancellation; it does not reverse external callback side effects. Late callbacks after cancellation, reset, clear, newer work, or destruction are ignored. The API remains same-thread with no timers, workers, locks, or timeout policy. Normal cancellation preserves state, history, and queued events without draining; startup cancellation rolls back startup state/history/queue.
+
 - `AddState()` and `AddTransition()` validate input and return `bool`.
 - States must be added before transitions.
 - Duplicate states and duplicate `from` + `event` transition keys are rejected.

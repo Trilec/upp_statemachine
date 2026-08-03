@@ -138,3 +138,7 @@ Queueing uses a bounded FIFO list of event names only.
 - richer GUI/state-view helpers derived from the validated visualizer
 - code-generation helpers
 - UppHub packaging notes
+
+## Async lifecycle hardening
+
+The core uses one active operation record with a monotonic sequence, operation kind, result, and exact-once settlement gate. Completion closures validate a weak machine-lifetime token and active-operation identity before mutating state. Cancellation wins over later completions. Successful ordering remains exit/enter, commit, success hooks, settlement, then optional queue drain; failures and normal cancellation do not commit or drain. Startup cancellation clears startup runtime state and queue. The contract remains same-thread and has no timers, workers, locks, scheduler, or automatic reversal of external side effects.

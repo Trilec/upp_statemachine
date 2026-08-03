@@ -65,12 +65,58 @@ static String GetStateMachineErrorText(StateMachineError error) {
     case StateMachineError::EventDroppedWhileTransitioning: return "Event dropped while transitioning";
     case StateMachineError::EventQueueFull: return "Event queue full";
     case StateMachineError::EventQueueDrainLimitReached: return "Event queue drain limit reached";
+    case StateMachineError::NoActiveTransition: return "No active transition";
     }
     return "Unknown error";
 }
 
 String StateMachine::GetLastErrorText() const {
     return GetStateMachineErrorText(last_error);
+}
+
+struct StateMachine::Operation {
+    TransitionResult result;
+    bool settled = false;
+    bool record = true;
+};
+
+uint64 StateMachine::GetActiveTransitionSequence() const {
+    return active_operation ? active_operation->result.sequence : 0;
+}
+
+void StateMachine::Settle(const std::shared_ptr<Operation>& op, TransitionOutcome outcome, bool success) {
+    if (!op || op->settled || active_operation != op)
+        return;
+    op->settled = true;
+    op->result.outcome = outcome;
+    active_operation.reset();
+    last_result = op->result;
+    transitioning = false;
+    if (WhenTransitionSettled)
+        WhenTransitionSettled(last_result);
+}
+
+bool StateMachine::CancelActiveTransition() {
+    if (!active_operation) {
+        last_error = StateMachineError::NoActiveTransition;
+        return false;
+    }
+    auto op = active_operation;
+    op->settled = true;
+    op->result.outcome = TransitionOutcome::Cancelled;
+    last_result = op->result;
+    active_operation.reset();
+    transitioning = false;
+    if (op->result.operation == TransitionOperationKind::Start) {
+        started = false;
+        current.Clear();
+        transitionHistory.Clear();
+        queued_events.Clear();
+    }
+    if (WhenTransitionSettled)
+        WhenTransitionSettled(last_result);
+    ClearError();
+    return true;
 }
 
 //------------------------------------------------------------------------------
@@ -189,26 +235,35 @@ bool StateMachine::Start() {
     }
 
     const String start_initial = initial;
+    auto op = std::make_shared<Operation>();
+    op->result.sequence = ++next_sequence;
+    op->result.operation = TransitionOperationKind::Start;
+    op->result.to = start_initial;
+    op->result.event = "__start";
+    active_operation = op;
+    std::weak_ptr<void> weak_lifetime = lifetime;
     auto start_finished = std::make_shared<bool>(false);
     started = true;
     transitioning = true;
     current = start_initial;
     ClearError();
 
-    auto finish_start = [this, start_initial, start_finished](bool success) {
+    auto finish_start = [this, weak_lifetime, op, start_initial, start_finished](bool success) {
+        if (weak_lifetime.expired() || active_operation != op || op->settled)
+            return;
         if (*start_finished)
             return;
         *start_finished = true;
 
         if (success) {
             transitionHistory.Add(MakeOne<TransitionRecord>("", start_initial, "__start"));
-            transitioning = false;
+            Settle(op, TransitionOutcome::Succeeded, true);
             ClearError();
             DrainQueuedEvents();
             return;
         }
 
-        transitioning = false;
+        Settle(op, TransitionOutcome::FailedStart, false);
         started = false;
         current.Clear();
         transitionHistory.Clear();
@@ -217,7 +272,7 @@ bool StateMachine::Start() {
     };
 
     if (init->OnEnter)
-        init->OnEnter(*this, [this, finish_start](bool success) {
+        init->OnEnter(*this, [weak_lifetime, finish_start](bool success) {
             finish_start(success);
         });
     else
@@ -365,17 +420,7 @@ bool StateMachine::GoBack() {
     back_transition.to    = last_step->from;
     back_transition.event = "__back";
 
-    bool began = DoTransition(back_transition, false, [this](bool success) {
-        if (success) {
-            transitionHistory.Pop();
-            if (logging)
-                DumpHistory();
-            ClearError();
-        }
-        else {
-            last_error = StateMachineError::BackTransitionFailed;
-        }
-    });
+    bool began = DoTransition(back_transition, false, TransitionOperationKind::Back);
     if (!began)
         return false;
     return true;
@@ -446,9 +491,7 @@ const Transition* StateMachine::FindTransition(const String& from, const String&
     return nullptr;
 }
 
-bool StateMachine::DoTransition(const Transition& t,
-                                bool record,
-                                Function<void(bool)> on_done)
+bool StateMachine::DoTransition(const Transition& t, bool record, TransitionOperationKind kind)
 {
     if (logging)
         LOG(Format("DoTransition: %s -> %s, record=%d", t.from, t.to, int(record)));
@@ -459,17 +502,24 @@ bool StateMachine::DoTransition(const Transition& t,
         last_error = StateMachineError::MissingFromState;
         if (logging)
             LOG("Error: Transition specifies a missing from state.");
-        if (on_done) on_done(false);
         return false;
     }
     if (!toState) {
         last_error = StateMachineError::MissingToState;
         if (logging)
             LOG("Error: Transition specifies a missing to state.");
-        if (on_done) on_done(false);
         return false;
     }
 
+    auto op = std::make_shared<Operation>();
+    op->result.sequence = ++next_sequence;
+    op->result.operation = kind;
+    op->result.from = t.from;
+    op->result.to = t.to;
+    op->result.event = t.event;
+    op->record = record;
+    active_operation = op;
+    std::weak_ptr<void> weak_lifetime = lifetime;
     auto enter_finished = std::make_shared<bool>(false);
     auto exit_finished  = std::make_shared<bool>(false);
     auto enter_started  = std::make_shared<bool>(false);
@@ -484,13 +534,17 @@ bool StateMachine::DoTransition(const Transition& t,
         t.OnBefore(ctx);
 
     // Chain exit → enter → finalize → after
-    auto on_enter_done = [this, ctx, record, on_done, t, enter_finished, enter_started](bool success) {
+    auto on_enter_done = [this, weak_lifetime, op, ctx, record, t, enter_finished, enter_started](bool success) {
+        if (weak_lifetime.expired() || active_operation != op || op->settled)
+            return;
         if (*enter_finished)
             return;
         *enter_finished = true;
 
         if (success) {
             Finalize(ctx, record);
+            if (op->result.operation == TransitionOperationKind::Back && !transitionHistory.IsEmpty())
+                transitionHistory.Pop();
             if (WhenTransitionFinished)
                 WhenTransitionFinished(ctx);
 
@@ -507,13 +561,15 @@ bool StateMachine::DoTransition(const Transition& t,
             else
                 last_error = StateMachineError::ExitFailed;
         }
-        transitioning = false;
-        if (on_done) on_done(success);
+        Settle(op, success ? TransitionOutcome::Succeeded :
+               (!record ? TransitionOutcome::FailedBack : (*enter_started ? TransitionOutcome::FailedEnter : TransitionOutcome::FailedExit)), success);
         if (success)
             DrainQueuedEvents();
     };
 
-    auto on_exit_done = [this, toState, ctx, on_enter_done, exit_finished, enter_started, enter_finished, record](bool success) {
+    auto on_exit_done = [this, weak_lifetime, op, toState, ctx, on_enter_done, exit_finished, enter_started, enter_finished, record](bool success) {
+        if (weak_lifetime.expired() || active_operation != op || op->settled)
+            return;
         if (*exit_finished)
             return;
         *exit_finished = true;
