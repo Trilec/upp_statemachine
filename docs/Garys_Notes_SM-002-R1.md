@@ -252,3 +252,12 @@ These behaviours require a clean rerun after the lifetime defect is fixed.
    `upp_animation` and `upp_Ui` source locations.
 5. Review all changed implementation/tests/docs and update README, API, DESIGN,
    CHANGELOG, and the handover notes accurately.
+
+## SM-002-R3 completion note
+
+R3 retains `One<Operation>` / `Pte<Operation>` / `Ptr<Operation>` completion
+ownership. Guard dispatch now validates a runtime/configuration generation
+before handling either result. The debug-heap Core suite passes 224/224 tests.
+The spot-check visualizer retains unit, sequence, forced-review decision,
+completion, and route-once state; cancellation routes the item once and a late
+completion is visibly ignored. Shipment tokens retain their batch quantity.

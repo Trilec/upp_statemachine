@@ -282,6 +282,7 @@ bool StateMachine::AddState(State s) {
     }
 
     states.Add(MakeOne<State>(pick(s)));
+    ++runtime_generation;
     ClearError();
     return true;
 }
@@ -323,6 +324,7 @@ bool StateMachine::AddTransition(Transition t) {
     }
 
     transitions.Add(MakeOne<Transition>(pick(t)));
+    ++runtime_generation;
     ClearError();
     return true;
 }
@@ -381,6 +383,7 @@ bool StateMachine::Start() {
     started = true;
     transitioning = true;
     current = start_initial;
+    ++runtime_generation;
     ClearError();
 
     auto initial_enter = init->OnEnter;
@@ -440,18 +443,20 @@ bool StateMachine::TriggerEvent(const String& e) {
 
     const String source_before_guard = current;
     const uint64 guard_ticket = ++guard_generation;
+    const uint64 runtime_ticket = runtime_generation;
     Ptr<Lifetime> guard_lifetime(lifetime.Get());
     auto guard = t.Guard;
     TransitionContext ctx(*this, t.from, t.to, t.event);
-    if (guard && !guard(ctx)) {
-        if (!guard_lifetime || guard_lifetime->owner != this)
-            return false;
+    const bool allowed = !guard || guard(ctx);
+    if (!guard_lifetime || guard_lifetime->owner != this || guard_generation != guard_ticket ||
+        runtime_generation != runtime_ticket ||
+        !started || transitioning || current != source_before_guard || current != t.from)
+        return false;
+
+    if (!allowed) {
         last_error = StateMachineError::GuardRejected;
         return false;
     }
-    if (!guard_lifetime || guard_lifetime->owner != this || guard_generation != guard_ticket ||
-        !started || transitioning || current != source_before_guard || current != t.from)
-        return false;
 
     if (!DoTransition(t)) {
         return false;
@@ -510,18 +515,20 @@ bool StateMachine::TryTransition(const Transition& t) {
 
     const String source_before_guard = current;
     const uint64 guard_ticket = ++guard_generation;
+    const uint64 runtime_ticket = runtime_generation;
     Ptr<Lifetime> guard_lifetime(lifetime.Get());
     auto guard = transition.Guard;
     TransitionContext ctx(*this, transition.from, transition.to, transition.event);
-    if (guard && !guard(ctx)) {
-        if (!guard_lifetime || guard_lifetime->owner != this)
-            return false;
+    const bool allowed = !guard || guard(ctx);
+    if (!guard_lifetime || guard_lifetime->owner != this || guard_generation != guard_ticket ||
+        runtime_generation != runtime_ticket ||
+        !started || transitioning || current != source_before_guard || current != transition.from)
+        return false;
+
+    if (!allowed) {
         last_error = StateMachineError::GuardRejected;
         return false;
     }
-    if (!guard_lifetime || guard_lifetime->owner != this || guard_generation != guard_ticket ||
-        !started || transitioning || current != source_before_guard || current != transition.from)
-        return false;
 
     if (!DoTransition(transition)) {
         return false;
@@ -573,6 +580,7 @@ bool StateMachine::Reset() {
     transitioning = false;
     transitionHistory.Clear();
     queued_events.Clear();
+    ++runtime_generation;
     ClearError();
     return true;
 }
@@ -594,6 +602,7 @@ bool StateMachine::Clear() {
     transitions.Clear();
     transitionHistory.Clear();
     queued_events.Clear();
+    ++runtime_generation;
     ClearError();
     return true;
 }
@@ -659,6 +668,7 @@ bool StateMachine::DoTransition(const Transition& t, bool record, TransitionOper
     Operation* active = active_operation.Get();
     ClearError();
     transitioning = true;
+    ++runtime_generation;
     TransitionContext ctx(*this, transition.from, transition.to, transition.event);
 
     Ptr<Lifetime> callback_lifetime(lifetime.Get());

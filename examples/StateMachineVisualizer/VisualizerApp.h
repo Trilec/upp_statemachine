@@ -47,6 +47,13 @@ public:
         ProcessingStage stage = ProcessingStage::Assembly;
         double remaining_seconds = 0.0;
     };
+    struct ActiveAudit {
+        int unit_id = 0;
+        uint64 sequence = 0;
+        bool force_review = false;
+        bool routed = false;
+        Function<void(bool)> completion;
+    };
 
     VisualizerApp();
 
@@ -58,6 +65,8 @@ private:
     void BuildAuditMachine();
     void ArmSpotCheck();
     void CancelSpotCheck();
+    void RouteAuditedUnit(ActiveAudit& audit);
+    void SetAuditDisplay(const String& text);
     void ResetScenario();
     void ToggleRunPause();
     void InjectPartA();
@@ -69,7 +78,7 @@ private:
     void StartProcessingJob(int work_item_id, ProcessingStage stage, double seconds);
     void TickProcessing();
     void SpawnPart(const String& edge_id, VisualTokenKind kind, const String& label, Color c, bool recycle = false, int work_item_id = 0);
-    void SpawnManufacturingToken(const String& edge_id, VisualTokenKind kind, const String& label, Color c, double speed = 1.0, int work_item_id = 0);
+    void SpawnManufacturingToken(const String& edge_id, VisualTokenKind kind, const String& label, Color c, double speed = 1.0, int work_item_id = 0, int quantity = 0);
     void ProcessArrival(const VisualToken& token);
     void ProcessCheckResult(int work_item_id, bool force_review);
     void ProcessReviewResult(int work_item_id);
@@ -85,6 +94,7 @@ private:
     StateMachine control_;
     StateMachine audit_;
     Function<void(bool)> audit_completion_;
+    ActiveAudit active_audit_;
     bool running_ = false;
     bool force_next_review_ = false;
     bool force_next_reject_ = false;
@@ -99,11 +109,10 @@ private:
     double generation_accumulator_ = 0.0;
     double flow_speed_ = 1.0;
     double async_check_accumulator_ = 0.0;
-    double async_monitor_remaining_ = 0.0;
+    double audit_status_remaining_ = 0.0;
     bool async_checks_enabled_ = true;
     bool audit_armed_ = false;
     bool audit_cancelled_ = false;
-    int audit_unit_id_ = 0;
     Array<ProcessingJob> processing_jobs_;
     TimeCallback tick_;
 

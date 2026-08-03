@@ -84,6 +84,7 @@ struct VisualToken : Moveable<VisualToken> {
     String id;
     String edge_id;
     int work_item_id = 0;
+    int quantity = 0;
     VisualTokenKind kind = VisualTokenKind::PartA;
     String short_label;
     double progress = 0.0;
@@ -204,12 +205,13 @@ struct VisualizerModel {
             nodes[i].active = nodes[i].id == id;
     }
 
-    void AddToken(const String& edge_id, VisualTokenKind kind, const String& short_label, Color c, double speed = 1.0, int work_item_id = 0)
+    void AddToken(const String& edge_id, VisualTokenKind kind, const String& short_label, Color c, double speed = 1.0, int work_item_id = 0, int quantity = 0)
     {
         VisualToken t;
         t.id = Format("tok-%d", ++token_counter);
         t.edge_id = edge_id;
         t.work_item_id = work_item_id;
+        t.quantity = quantity;
         t.kind = kind;
         t.short_label = short_label;
         t.color = c;

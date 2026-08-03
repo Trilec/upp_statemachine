@@ -8,7 +8,7 @@
 - **Published HEAD verified on 2026-08-02:** `93e20f109181e16667176214484cb4f585a3d2b8`.
 - **Reported local path:** `E:\apps\github\upp_statemachine`.
 - **Purpose:** provide a deterministic, reusable, GUI-independent lifecycle engine with asynchronous enter/exit operations.
-- **Current phase:** SM-002 is implemented locally; SM-002-R1 closes re-entrant settlement and lifetime gaps pending supervisor review.
+- **Current phase:** SM-002-R3 completes lifecycle acceptance locally; supervisor review is pending.
 - **Boundary:** this remains a one-current-state Core-only FSM. It does not become a graph scheduler, agent runtime, GUI system, tool broker, conversation layer, or MCP component.
 
 ## 2. Roles, Workflow, and Task Standards
@@ -129,8 +129,8 @@ Strict prohibitions:
 
 | Component | Purpose | Current status | Limits |
 |---|---|---|---|
-| `statemachine` | Reusable FSM | Published v1.0.1 | No cancellation/lifetime-safe late callback yet |
-| `StateMachineCoreTest` | Authoritative regression suite | Published 190/190 | Needs async cancellation/lifetime matrix |
+| `statemachine` | Reusable FSM | Local SM-002-R3 | Cancellation and lifetime-safe late callbacks implemented |
+| `StateMachineCoreTest` | Authoritative regression suite | Local 224/224 | Deterministic lifecycle matrix expanded |
 | `StateMachineGuiTest` | GUI build/manual check | Published | Not behavioural authority for core |
 | `StateMachineVisualizer` | Visual/manual harness | Published | Reference only; must not drive core design |
 | Structured settlement | Terminal async outcome | Implemented; R1 validation pending | Supervisor review |

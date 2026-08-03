@@ -4900,6 +4900,49 @@ CONSOLE_APP_MAIN
             ctx.Check(sm.GetHistoryCount() == 1, "Failed transitions must not commit history");
         });
 
+        add("Guard false after reset preserves nested error and result", [](TestContext& ctx) {
+            StateMachine sm;
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto d) { d(true); }, {}});
+            sm.AddState({"B", [](auto&, auto d) { d(true); }, {}});
+            Transition t{"go", "A", "B"};
+            t.Guard = [&](const auto&) { sm.Reset(); return false; };
+            sm.AddTransition(t);
+            sm.Start();
+            TransitionResult before = sm.GetLastTransitionResult();
+            ctx.Check(!sm.TriggerEvent("go"), "Invalidated false guard is rejected");
+            ctx.Check(!sm.IsStarted() && sm.GetLastError() == StateMachineError::None && sm.GetLastTransitionResult().sequence == before.sequence,
+                "Stale false guard cannot overwrite nested reset authority");
+        });
+
+        add("Guard reconstruction and nested transition invalidate outer dispatch", [](TestContext& ctx) {
+            StateMachine sm;
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto d) { d(true); }, {}});
+            sm.AddState({"B", [](auto&, auto d) { d(true); }, {}});
+            sm.AddState({"C", [](auto&, auto d) { d(true); }, {}});
+            sm.AddTransition({"inner", "A", "C"});
+            Transition outer{"outer", "A", "B"};
+            outer.Guard = [&](const auto&) { sm.TriggerEvent("inner"); return true; };
+            sm.AddTransition(outer);
+            sm.Start();
+            ctx.Check(!sm.TriggerEvent("outer") && sm.GetCurrent() == "C", "Nested accepted transition owns the result");
+            ctx.Check(sm.GetLastTransitionResult().event == "inner" && sm.GetLastError() == StateMachineError::None, "Outer guard remains unpublished");
+        });
+
+        add("Guard clear reconstruction invalidates same-state dispatch", [](TestContext& ctx) {
+            StateMachine sm;
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto d) { d(true); }, {}});
+            sm.AddState({"B", [](auto&, auto d) { d(true); }, {}});
+            Transition t{"go", "A", "B"};
+            t.Guard = [&](const auto&) {
+                sm.Clear(); sm.SetInitial("A"); sm.AddState({"A", [](auto&, auto d) { d(true); }, {}}); sm.AddState({"B", [](auto&, auto d) { d(true); }, {}}); sm.Start(); return true;
+            };
+            sm.AddTransition(t); sm.Start();
+            ctx.Check(!sm.TriggerEvent("go") && sm.GetCurrent() == "A", "Reconstruction with same ids invalidates outer guard");
+        });
+
     });
 
     RunGroup("SM-002 async lifecycle hardening", passed, failed, [&](auto add) {

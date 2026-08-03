@@ -155,3 +155,8 @@ keeps `IsTransitioning()` false while a guard runs, while rejecting stale outer
 continuation after nested work, reset, clear, or destruction. Queue draining
 holds a lifetime observer around each dispatch and returns without further
 member access when a callback destroys the machine.
+
+The preflight identity combines that guard generation with an internal
+runtime/configuration mutation generation. It is checked after every guard
+return before handling either true or false, so nested lifecycle work cannot
+publish a stale outer transition or stale `GuardRejected` error.

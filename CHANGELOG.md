@@ -1,15 +1,18 @@
 # Changelog
 
-## Next
+## Unreleased v1.1
 
-- Added explicit async cancellation, structured settlement, monotonic sequences, stale-completion rejection, and destruction-safe callbacks.
-- Preserved successful hook ordering and queue behavior; timeout and external-side-effect ownership remain with callers.
-
-## Unreleased
-
-### Added
-
-- No new release items planned yet.
+- Added explicit cancellation, exact-once `TransitionResult` settlement,
+  monotonic operation sequences, stale-completion rejection, and safe retained
+  `done(bool)` callbacks after reset, clear, replacement, or destruction.
+- Guard preflights now validate lifetime, source state, and runtime/configuration
+  mutation identity before either accepting or reporting rejection.
+- Preserved successful hook ordering; cancellation does not commit history or
+  drain normal queued events. Timeout and side-effect compensation remain
+  caller-owned.
+- Expanded deterministic Core coverage to 224 debug-heap tests and updated the
+  Visualizer spot-check demonstration with route-once cancellation and immutable
+  shipment quantities.
 
 ## v1.0.1
 

@@ -9,12 +9,21 @@ reporting, and bounded event handling while a transition is active.
 
 ## Status
 
-The v1.0.1 baseline status:
+The current SM-002 lifecycle-hardening status:
 
-- `StateMachineCoreTest`: `190/190`
+- `StateMachineCoreTest`: `224/224` debug-heap tests
 - `StateMachineGuiTest`: builds successfully
 - `StateMachineVisualizer`: builds and launches
 - `statemachine/statemachine.upp`: depends only on `Core` 
+
+Async operations have monotonic sequence identity and settle exactly once as
+success, failure, or cancellation. `done(bool)` callbacks remain compatible;
+retained, repeated, stale, or post-destruction callbacks are inert. Guards run
+before an operation starts and their result is accepted only if the same
+lifetime, source state, and runtime/configuration generation remain current.
+Cancellation preserves normal transition and `GoBack()` state/history, does
+not drain queued events, and leaves timeout/external-side-effect policy to the
+caller. The API is same-thread only and is neither copyable nor movable.
 
 This added `StateMachineVisualizer` package is one of the example apps: an
 optional animated manufacturing-flow visual/manual harness using `Ui`,

@@ -442,3 +442,14 @@ queries, `GetLastTransitionResult()`, `GetLastTransitionOutcome()`, and
 preflight callbacks: they run before an operation is accepted and are not
 settled results when rejected. Timeout policy and external side effects remain
 caller-owned.
+
+## SM-002 lifecycle contract
+
+`TransitionOperationKind` is `None`, `Start`, `Transition`, or `Back`.
+`TransitionOutcome` is `None`, `Succeeded`, `FailedStart`, `FailedExit`,
+`FailedEnter`, `FailedBack`, or `Cancelled`. `WhenTransitionSettled` fires
+once for every accepted operation; `WhenTransitionFinished` and `OnAfter`
+remain success-only. A stale guard (including one returning false) is ignored
+before it can change the last error. Cancellation of normal and back work keeps
+current state/history and does not drain queued events; cancelled startup clears
+its runtime and startup queue.

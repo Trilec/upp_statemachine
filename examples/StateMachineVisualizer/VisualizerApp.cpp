@@ -57,13 +57,15 @@ void GuidePanel::Paint(Draw& w)
     w.DrawText(x, y, "U  assembled unit", SansSerifZ(10).Bold(), VizGreen()); y += DPI(16);
     w.DrawText(x, y, "R  review unit", SansSerifZ(10).Bold(), VizAmber()); y += DPI(16);
     w.DrawText(x, y, "X  rejected/recycled", SansSerifZ(10).Bold(), VizRed()); y += DPI(16);
-    w.DrawText(x, y, "N  shipment batch", SansSerifZ(10).Bold(), VizViolet());
+    w.DrawText(x, y, "N  shipment batch", SansSerifZ(10).Bold(), VizViolet()); y += DPI(16);
+    w.DrawText(x, y, "Dashed cyan  temporary automated spot check", SansSerifZ(10), VizCyan()); y += DPI(16);
+    w.DrawText(x, y, "Monitor: dormant, armed, auditing; late results are ignored", SansSerifZ(10), VizMutedInk());
 }
 
 VisualizerApp::VisualizerApp()
 {
     Title("StateMachine Manufacturing Visualizer").Sizeable().Zoomable();
-    SetRect(0, 0, DPI(1250), DPI(810));
+    SetRect(0, 0, DPI(1480), DPI(880));
 
     BuildControlMachine();
     model_.ResetManufacturingGraph();
@@ -117,7 +119,7 @@ VisualizerApp::VisualizerApp()
     force_reject_btn_.SetText("Force Reject");
     reset_btn_.SetText("Reset");
     run_audit_btn_.SetText("Run spot check now");
-    async_check_toggle_.SetText("Auto lifecycle checks");
+    async_check_toggle_.SetText("Automatic spot checks");
     async_check_toggle_.SetData(true);
 
     speed_slider_.SetRange(0.5, 3.0).SetStep(0.25).SetValue(1.0).SetSizeMin(DPI(120), DPI(24));
@@ -206,24 +208,29 @@ void VisualizerApp::BuildControlMachine()
 
 void VisualizerApp::BuildAuditMachine()
 {
-    audit_.Clear();
+    if(audit_.IsTransitioning())
+        audit_.CancelActiveTransition();
+    if(!audit_.Clear()) {
+        model_.AddLog("Audit", "Could not clear audit machine.", "alert");
+        return;
+    }
     audit_completion_.Clear();
-    audit_.SetInitial("DORMANT");
-    audit_.AddState({"DORMANT", [](StateMachine&, Function<void(bool)> done) { done(true); }, {}});
-    audit_.AddState({"AUDITING", [&](StateMachine&, Function<void(bool)> done) { audit_completion_ = done; }, {}});
-    audit_.AddTransition({"audit", "DORMANT", "AUDITING"});
-    audit_.AddTransition({"complete", "AUDITING", "DORMANT"});
-    audit_.Start();
+    if(!audit_.SetInitial("DORMANT") ||
+       !audit_.AddState({"DORMANT", [](StateMachine&, Function<void(bool)> done) { done(true); }, {}}) ||
+       !audit_.AddState({"AUDITING", [&](StateMachine&, Function<void(bool)> done) { audit_completion_ = done; }, {}}) ||
+       !audit_.AddTransition({"audit", "DORMANT", "AUDITING"}) ||
+       !audit_.AddTransition({"complete", "AUDITING", "DORMANT"}) || !audit_.Start())
+        model_.AddLog("Audit", "Could not rebuild audit machine: " + audit_.GetLastErrorText(), "alert");
 }
 
 void VisualizerApp::ArmSpotCheck()
 {
-    if(audit_.IsTransitioning() || audit_armed_)
+    if(!async_checks_enabled_ || audit_.IsTransitioning() || audit_armed_)
         return;
     audit_armed_ = true;
     if(VisualNodeSpec* monitor = model_.FindNode("ASYNC_MONITOR")) {
         monitor->active = true;
-        monitor->copy = "ARMED / waiting for unit";
+        monitor->copy = "ARMED / next eligible unit";
     }
     model_.AddLog("Async Monitor", "ARMED — waiting for one Quality Check unit.", "system");
 }
@@ -233,9 +240,35 @@ void VisualizerApp::CancelSpotCheck()
     audit_armed_ = false;
     if(audit_.IsTransitioning()) {
         audit_cancelled_ = audit_.CancelActiveTransition();
-        if(VisualNodeSpec* monitor = model_.FindNode("ASYNC_MONITOR"))
-            monitor->copy = "CANCELLED — late result ignored";
-        model_.AddLog("Async Monitor", "CANCELLED — late result will be ignored.", "warning");
+        if(audit_cancelled_) {
+            SetAuditDisplay(Format("CANCELLED sequence %lld", (int64)active_audit_.sequence));
+            RouteAuditedUnit(active_audit_);
+            audit_status_remaining_ = 1.2;
+            model_.AddLog("Async Monitor", "CANCELLED; sampled unit routed once.", "warning");
+        }
+    }
+    else
+        SetAuditDisplay("DORMANT / waiting");
+}
+
+void VisualizerApp::SetAuditDisplay(const String& text)
+{
+    if(VisualNodeSpec* monitor = model_.FindNode("ASYNC_MONITOR"))
+        monitor->copy = text;
+}
+
+void VisualizerApp::RouteAuditedUnit(ActiveAudit& audit)
+{
+    if(audit.routed || !audit.unit_id)
+        return;
+    audit.routed = true;
+    if(audit.force_review || Random(100) < review_probability_) {
+        SpawnManufacturingToken("async_to_review", VisualTokenKind::ReviewUnit, "R", VizAmber(), 0.9, audit.unit_id);
+        SetAuditDisplay(Format("ESCALATED unit %d", audit.unit_id));
+    }
+    else {
+        SpawnManufacturingToken("async_to_packaging", VisualTokenKind::AssembledUnit, "U", VizGreen(), 0.9, audit.unit_id);
+        SetAuditDisplay(Format("PASSED unit %d", audit.unit_id));
     }
 }
 
@@ -271,10 +304,11 @@ void VisualizerApp::ResetScenario()
     speed_slider_.SetData(1.0);
     generation_accumulator_ = 0.0;
     async_check_accumulator_ = 0.0;
-    async_monitor_remaining_ = 0.0;
+    audit_status_remaining_ = 0.0;
     async_checks_enabled_ = true;
     async_check_toggle_.SetData(true);
     processing_jobs_.Clear();
+    active_audit_ = ActiveAudit();
     next_work_item_id_ = 0;
     accepted_units_ = 0;
     shipped_units_ = 0;
@@ -308,7 +342,7 @@ void VisualizerApp::ToggleRunPause()
     status_label_.SetLabel(StatusText());
 }
 
-void VisualizerApp::SpawnManufacturingToken(const String& edge_id, VisualTokenKind kind, const String& label, Color c, double speed, int work_item_id)
+void VisualizerApp::SpawnManufacturingToken(const String& edge_id, VisualTokenKind kind, const String& label, Color c, double speed, int work_item_id, int quantity)
 {
     const VisualEdgeSpec* e = model_.FindEdge(edge_id);
     if(!e) {
@@ -316,7 +350,7 @@ void VisualizerApp::SpawnManufacturingToken(const String& edge_id, VisualTokenKi
         model_.AddLog("FSM", model_.last_fsm_error, "alert");
         return;
     }
-    model_.AddToken(edge_id, kind, label, c, speed, work_item_id);
+    model_.AddToken(edge_id, kind, label, c, speed, work_item_id, quantity);
 }
 
 void VisualizerApp::SpawnPart(const String& edge_id, VisualTokenKind kind, const String& label, Color c, bool recycle, int work_item_id)
@@ -400,8 +434,8 @@ void VisualizerApp::ProcessArrival(const VisualToken& token)
     else if(token.kind == VisualTokenKind::ShipmentBatch && e->to == "SHIPPING") {
         node->shipping++;
         model_.completed_shipments++;
-        shipped_units_ += package_size_;
-        model_.AddLog("Shipping", "Shipment batch completed.", "success");
+        shipped_units_ += token.quantity;
+        model_.AddLog("Shipping", Format("Shipment of %d completed.", token.quantity), "success");
     }
     else if(token.kind == VisualTokenKind::RecycledPartA && e->to == "ASSEMBLY") {
         node->recycled++;
@@ -426,7 +460,8 @@ void VisualizerApp::ProcessArrival(const VisualToken& token)
             if(p->packaging_buffer >= package_size_) {
                 p->packaging_buffer -= package_size_;
                 model_.accepted_units_waiting = max(0, model_.accepted_units_waiting - package_size_);
-                SpawnManufacturingToken("packaging_to_shipping", VisualTokenKind::ShipmentBatch, Format("%d", package_size_), VizViolet(), 0.95, token.work_item_id);
+                const int batch_quantity = package_size_;
+                SpawnManufacturingToken("packaging_to_shipping", VisualTokenKind::ShipmentBatch, Format("%d", batch_quantity), VizViolet(), 0.95, token.work_item_id, batch_quantity);
                 model_.AddLog("Packaging", Format("%d accepted units became one shipment.", package_size_), "success");
             }
         }
@@ -444,9 +479,12 @@ void VisualizerApp::ProcessCheckResult(int work_item_id, bool force_review)
     if(audit_armed_ && audit_.TriggerEvent("audit")) {
         audit_armed_ = false;
         audit_cancelled_ = false;
-        audit_unit_id_ = work_item_id;
-        if(VisualNodeSpec* monitor = model_.FindNode("ASYNC_MONITOR"))
-            monitor->copy = Format("CHECKING unit %d", work_item_id);
+        active_audit_ = ActiveAudit();
+        active_audit_.unit_id = work_item_id;
+        active_audit_.sequence = audit_.GetActiveTransitionSequence();
+        active_audit_.force_review = force_review;
+        active_audit_.completion = audit_completion_;
+        SetAuditDisplay(Format("AUDITING unit %d / sequence %lld", work_item_id, (int64)active_audit_.sequence));
         SpawnManufacturingToken("check_to_async_monitor", VisualTokenKind::AssembledUnit, "U", VizCyan(), 0.85, work_item_id);
         model_.AddLog("Quality Check", Format("[Unit %d] selected for spot check.", work_item_id), "system");
         return;
@@ -551,14 +589,8 @@ void VisualizerApp::UpdateFrame()
         TryAssemble();
     }
 
-    if(async_monitor_remaining_ > 0.0) {
-        async_monitor_remaining_ -= dt;
-        if(async_monitor_remaining_ <= 0.0)
-            if(VisualNodeSpec* monitor = model_.FindNode("ASYNC_MONITOR")) {
-                monitor->active = false;
-                monitor->copy = "Idle / watching";
-            }
-    }
+    if(audit_status_remaining_ > 0.0 && (audit_status_remaining_ -= dt) <= 0.0)
+        SetAuditDisplay("DORMANT / waiting");
     if(async_checks_enabled_) {
         async_check_accumulator_ += dt;
         if(async_check_accumulator_ >= async_check_slider_.GetValue()) {
@@ -603,24 +635,18 @@ void VisualizerApp::TickProcessing()
         case ProcessingStage::AsyncMonitor: {
             if(VisualNodeSpec* n = model_.FindNode("ASYNC_MONITOR"))
                 n->assembled = max(0, n->assembled - 1);
-            if(audit_cancelled_) {
-                audit_completion_(true);
+            if(audit_cancelled_ || active_audit_.routed) {
+                active_audit_.completion(true);
+                SetAuditDisplay(Format("LATE RESULT IGNORED sequence %lld", (int64)active_audit_.sequence));
+                audit_status_remaining_ = 1.2;
                 model_.AddLog("Async Monitor", Format("[Unit %d] late result ignored after cancellation.", job.work_item_id), "warning");
                 break;
             }
             if(audit_.IsTransitioning())
-                audit_completion_(true);
+                active_audit_.completion(true);
             audit_.TriggerEvent("complete");
-            bool review = force_next_review_ || Random(100) < review_probability_;
-            force_next_review_ = false;
-            if(!review) {
-                SpawnManufacturingToken("async_to_packaging", VisualTokenKind::AssembledUnit, "U", VizGreen(), 0.9, job.work_item_id);
-                model_.AddLog("Async Monitor", Format("[Unit %d] Approved for packaging.", job.work_item_id), "success");
-            }
-            else {
-                SpawnManufacturingToken("async_to_review", VisualTokenKind::ReviewUnit, "R", VizAmber(), 0.9, job.work_item_id);
-                model_.AddLog("Async Monitor", Format("[Unit %d] Escalated to quality review.", job.work_item_id), "warning");
-            }
+            RouteAuditedUnit(active_audit_);
+            audit_status_remaining_ = 1.2;
             break;
         }
         case ProcessingStage::Disassembly:
@@ -690,7 +716,7 @@ void VisualizerApp::UpdateMetrics()
     reject_value_.SetLabel(Format("%d%%", reject_probability_));
     package_caption_.SetLabel("Package Size");
     package_value_.SetLabel(Format("%d", package_size_));
-    async_check_caption_.SetLabel("Lifecycle interval");
+    async_check_caption_.SetLabel("Spot-check interval");
     async_check_value_.SetLabel(Format("%.0fs", async_check_slider_.GetValue()));
     if(VisualEdgeSpec* e = model_.FindEdge("packaging_to_shipping"))
         e->label = Format("Batch of %d", package_size_);
