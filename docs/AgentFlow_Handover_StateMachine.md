@@ -113,7 +113,7 @@ Strict prohibitions:
 ### Accepted milestones
 
 - v1.0.1 provides validated state/transition configuration, asynchronous enter/exit, guards/hooks, history, reset/reuse, error reporting, and bounded event queueing.
-- The authoritative Core test baseline is 190/190; GUI test builds; visualizer builds and launches.
+- Current R4 validation target is the expanded 226-test Core suite; GUI and Visualizer builds are required.
 - Queue draining has a bounded synchronous cycle limit and preserves remaining queued events on refusal.
 - AgentFlow will use this FSM only for high-level run phases, not for individual graph nodes.
 
@@ -141,7 +141,7 @@ Strict prohibitions:
 ### GitHub verified
 
 - `main` HEAD is `93e20f109181e16667176214484cb4f585a3d2b8`.
-- README declares v1.0.1 and the 190/190 Core baseline.
+- README records the lifecycle-hardened current Core baseline and Core-only package boundary.
 - `statemachine` depends only on `Core`.
 - Current API documents structured cancellation and lifetime-safe StateMachine-supplied callbacks.
 
@@ -179,13 +179,13 @@ Estimated completion:
 - **SM-002 specification: approximately 95%.**
 - **SM-002 implementation: implemented locally.**
 
-Continue from: verify branch/HEAD/worktree; run 190/190 Core and GUI/example baseline; inspect all async paths; execute the exact task below.
+Continue from: `feature/async-lifecycle-hardening` at the current local R4 review commit; run the expanded Core suite and GUI/example validation before supervisor acceptance.
 
 ## 7. Validation Baseline
 
 | Validation | Accepted baseline / requirement |
 |---|---|
-| `StateMachineCoreTest` | Published baseline 190/190 |
+| `StateMachineCoreTest` | Current local lifecycle suite: 226/226 |
 | New cancellation tests | Pending exit, pending enter, startup, GoBack, duplicate/stale callback, repeat cancellation |
 | Lifetime tests | Completion after machine destruction must be harmless |
 | Queue tests | Retain/no auto-drain on normal cancellation; clear startup queue; stale callback cannot drain |
@@ -215,7 +215,7 @@ Authoritative task source: `Trilec/upp_agentflow/docs/AgentFlow_StateMachine_Adj
 **Task ID:** `SM-002-R1`  
 **Title:** Harden asynchronous lifecycle cancellation and settlement
 
-**Current context:** asynchronous completion currently requires owner lifetime and has no cancellation.
+**Current context:** asynchronous completion has explicit cancellation, exact-once settlement, and retained-callback lifetime safety.
 
 **Primary objective:** Make every asynchronous operation safely cancelable and exactly-once settled.
 
@@ -293,7 +293,7 @@ deterministic Core regression matrix.
 
 **Non-blocking:** final public result/outcome names; cancellation return shape; post-acceptance version number.
 
-**Require local verification:** worktree cleanliness; exact commands; 190/190 remains current; unpublished changes to preserve.
+**Require local verification:** clean worktree; exact commands; current expanded Core total; supervisor acceptance and merge remain.
 
 ## 10. New-Session Directives
 

@@ -135,6 +135,12 @@ void StateMachine::SettleClaimed(Operation* op, bool drain_queue) {
     if (!op || op->phase != Operation::Phase::Claiming || active_operation.Get() != op)
         return;
     op->phase = Operation::Phase::Settled;
+    if (op->result.outcome == TransitionOutcome::Cancelled ||
+        op->result.outcome == TransitionOutcome::FailedStart ||
+        op->result.outcome == TransitionOutcome::FailedExit ||
+        op->result.outcome == TransitionOutcome::FailedEnter ||
+        op->result.outcome == TransitionOutcome::FailedBack)
+        ++queue_drain_stop_generation;
     last_result = op->result;
     transitioning = false;
     const TransitionResult stable_result = op->result;
@@ -723,7 +729,7 @@ void StateMachine::DrainQueuedEvents() {
         String event = queued_events[0];
         queued_events.Remove(0);
         ++drain_steps;
-        const uint64 sequence_before = next_sequence;
+        const uint64 stop_generation_before = queue_drain_stop_generation;
         if (!TriggerEvent(event)) {
             if (!drain_lifetime || drain_lifetime->owner != this)
                 return;
@@ -733,7 +739,7 @@ void StateMachine::DrainQueuedEvents() {
             return;
         if (transitioning)
             break;
-        if (last_result.sequence > sequence_before && last_result.outcome == TransitionOutcome::Cancelled)
+        if (queue_drain_stop_generation != stop_generation_before)
             break;
         if (last_error != StateMachineError::None)
             break;

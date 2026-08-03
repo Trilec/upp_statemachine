@@ -69,7 +69,7 @@ Initial compact U++ state machine release.
 
 ### Verified
 
-- `StateMachineCoreTest` is green at `190/190`.
+- Historical v1.0.1 baseline: `StateMachineCoreTest` was green at `190/190`.
 - `StateMachineGuiTest` builds successfully.
 - `statemachine/statemachine.upp` depends only on `Core`.
 
@@ -82,11 +82,3 @@ Initial compact U++ state machine release.
 - Fixed queue draining after successful async `Start()`.
 - Fixed queue draining after successful `GoBack()` so history pop completes first.
 - Fixed self-feeding synchronous queued-event loops so they stop after the configured drain limit and report `EventQueueDrainLimitReached` without corrupting state or history.
-# Unreleased
-
-- Hardened asynchronous completion lifecycle with U++ operation observers,
-  exact-once settlement, cancellation outcomes, and re-entrant destruction
-  checks.
-- Added deterministic debug-heap callback-lifetime coverage.
-- Hardened guard preflight and queued dispatch against re-entrant destruction.
-- Updated the Visualizer example with a pulsed, one-item audit demonstration.

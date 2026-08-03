@@ -63,7 +63,7 @@ public:
 private:
     void BuildControlMachine();
     void BuildAuditMachine();
-    void ArmSpotCheck();
+    void ArmSpotCheck(bool manual = false);
     void CancelSpotCheck();
     void RouteAuditedUnit(ActiveAudit& audit);
     void SetAuditDisplay(const String& text);

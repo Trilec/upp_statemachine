@@ -5077,6 +5077,47 @@ CONSOLE_APP_MAIN
             ctx.Check(sm.GetCurrent() == "D" && sm.GetQueuedEventCount() == 0, "Later success should drain retained queue policy");
         });
 
+        add("Queued cancellation stops drain despite nested settlement", [](TestContext& ctx) {
+            Function<void(bool)> hold_done;
+            int second_runs = 0;
+            StateMachine sm;
+            sm.SetInitial("A"); sm.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
+            sm.AddState({"A", [](auto&, auto d) { d(true); }, [&](auto&, auto d) { hold_done = pick(d); }});
+            sm.AddState({"B", [](auto&, auto d) { d(true); }, {}});
+            sm.AddState({"C", [](auto&, auto d) { d(true); }, {}});
+            sm.AddState({"D", [](auto&, auto d) { d(true); }, {}});
+            sm.AddState({"N", [](auto&, auto d) { d(true); }, {}});
+            sm.AddTransition({"hold", "A", "B"});
+            Transition cancel{"cancel", "B", "C"};
+            cancel.OnBefore = [&](const auto&) { sm.CancelActiveTransition(); };
+            sm.AddTransition(cancel);
+            Transition second{"second", "B", "D"}; second.OnBefore = [&](const auto&) { ++second_runs; };
+            sm.AddTransition(second); sm.AddTransition({"nested", "B", "N"});
+            sm.WhenTransitionSettled = [&](const auto& r) { if(r.event == "cancel") sm.TriggerEvent("nested"); };
+            sm.Start(); sm.TriggerEvent("hold"); sm.TriggerEvent("cancel"); sm.TriggerEvent("second"); hold_done(true);
+            ctx.Check(second_runs == 0 && sm.GetQueuedEventCount() == 1, "Cancelled queued dispatch preserves later event");
+            ctx.Check(sm.GetCurrent() == "N" && sm.GetLastTransitionResult().event == "nested", "Nested settlement remains authoritative");
+        });
+
+        add("Queued failure stops drain despite nested settlement", [](TestContext& ctx) {
+            Function<void(bool)> hold_done;
+            int second_runs = 0;
+            StateMachine sm;
+            sm.SetInitial("A"); sm.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
+            sm.AddState({"A", [](auto&, auto d) { d(true); }, [&](auto&, auto d) { hold_done = pick(d); }});
+            sm.AddState({"B", [](auto&, auto d) { d(true); }, {}});
+            sm.AddState({"C", [](auto&, auto d) { d(false); }, {}});
+            sm.AddState({"D", [](auto&, auto d) { d(true); }, {}});
+            sm.AddState({"N", [](auto&, auto d) { d(true); }, {}});
+            sm.AddTransition({"hold", "A", "B"}); sm.AddTransition({"fail", "B", "C"});
+            Transition second{"second", "B", "D"}; second.OnBefore = [&](const auto&) { ++second_runs; }; sm.AddTransition(second);
+            sm.AddTransition({"nested", "B", "N"});
+            sm.WhenTransitionSettled = [&](const auto& r) { if(r.event == "fail") sm.TriggerEvent("nested"); };
+            sm.Start(); sm.TriggerEvent("hold"); sm.TriggerEvent("fail"); sm.TriggerEvent("second"); hold_done(true);
+            ctx.Check(second_runs == 0 && sm.GetQueuedEventCount() == 1, "Failed queued dispatch preserves later event");
+            ctx.Check(sm.GetCurrent() == "N" && sm.GetLastTransitionResult().event == "nested", "Nested result is not overwritten by drain");
+        });
+
         add("Enter cancellation preserves source and rejects late enter", [](TestContext& ctx) {
             Function<void(bool)> enter_done;
             int finished = 0, after = 0, settled = 0;

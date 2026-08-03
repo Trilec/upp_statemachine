@@ -125,7 +125,7 @@ Queueing uses a bounded FIFO list of event names only.
 ## Current boundaries
 
 - flat states only
-- no transition cancellation
+- cancellation is supported for the one active operation only
 - no internal thread synchronization
 - queued `TryTransition()` and `GoBack()` are not supported
 - `true` generally means an operation was accepted or began; it does not imply
@@ -133,7 +133,6 @@ Queueing uses a bounded FIFO list of event names only.
 
 ## Future directions
 
-- cancellation policy
 - hierarchical states
 - richer GUI/state-view helpers derived from the validated visualizer
 - code-generation helpers

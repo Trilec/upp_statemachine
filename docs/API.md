@@ -163,7 +163,9 @@ the reason.
 
 `QueueWhileTransitioning` is intentionally lightweight: queued `TriggerEvent()`
 names only, bounded FIFO order, no queued `TryTransition()`, no queued
-`GoBack()`, no cancellation, and no hierarchy.
+`GoBack()`, and no per-entry cancellation handle. The currently active
+operation may still be cancelled; a cancellation or failure stops that drain
+cycle even if its settlement hook completes newer work.
 
 ## Queue draining
 

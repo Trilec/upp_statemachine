@@ -238,7 +238,7 @@ struct VisualizerModel {
         case VisualTokenKind::AssembledUnit: return "U";
         case VisualTokenKind::ReviewUnit: return "R";
         case VisualTokenKind::RejectedUnit: return "X";
-        case VisualTokenKind::ShipmentBatch: return "5";
+        case VisualTokenKind::ShipmentBatch: return "N";
         case VisualTokenKind::RecycledPartA: return "A";
         case VisualTokenKind::RecycledPartB: return "B";
         }

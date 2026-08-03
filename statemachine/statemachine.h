@@ -308,6 +308,9 @@ namespace Upp {
 	    // Invalidates a guard preflight when accepted lifecycle or configuration
 	    // work changes the machine without necessarily changing its final state id.
 	    uint64 runtime_generation = 0;
+	    // Lets a queue-drain cycle observe its own terminal cancellation/failure
+	    // even when a settlement callback synchronously publishes newer work.
+	    uint64 queue_drain_stop_generation = 0;
 	    One<Lifetime> lifetime;
 	};
 

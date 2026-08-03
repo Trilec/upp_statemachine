@@ -159,7 +159,7 @@ VisualizerApp::VisualizerApp()
         SyncGraph();
     };
     reset_btn_.WhenAction = [=] { ResetScenario(); };
-    run_audit_btn_.WhenAction = [=] { ArmSpotCheck(); };
+    run_audit_btn_.WhenAction = [=] { ArmSpotCheck(true); };
 
     speed_slider_.WhenAction = [=] {
         model_.AddLog("Config", Format("Flow speed set to %.2fx.", speed_slider_.GetValue()), "system");
@@ -223,9 +223,9 @@ void VisualizerApp::BuildAuditMachine()
         model_.AddLog("Audit", "Could not rebuild audit machine: " + audit_.GetLastErrorText(), "alert");
 }
 
-void VisualizerApp::ArmSpotCheck()
+void VisualizerApp::ArmSpotCheck(bool manual)
 {
-    if(!async_checks_enabled_ || audit_.IsTransitioning() || audit_armed_)
+    if((!manual && !async_checks_enabled_) || audit_.IsTransitioning() || audit_armed_)
         return;
     audit_armed_ = true;
     if(VisualNodeSpec* monitor = model_.FindNode("ASYNC_MONITOR")) {
@@ -241,7 +241,7 @@ void VisualizerApp::CancelSpotCheck()
     if(audit_.IsTransitioning()) {
         audit_cancelled_ = audit_.CancelActiveTransition();
         if(audit_cancelled_) {
-            SetAuditDisplay(Format("CANCELLED sequence %lld", (int64)active_audit_.sequence));
+            SetAuditDisplay(Format("CANCELLED sequence %lld / unit routed once", (int64)active_audit_.sequence));
             RouteAuditedUnit(active_audit_);
             audit_status_remaining_ = 1.2;
             model_.AddLog("Async Monitor", "CANCELLED; sampled unit routed once.", "warning");
@@ -264,11 +264,17 @@ void VisualizerApp::RouteAuditedUnit(ActiveAudit& audit)
     audit.routed = true;
     if(audit.force_review || Random(100) < review_probability_) {
         SpawnManufacturingToken("async_to_review", VisualTokenKind::ReviewUnit, "R", VizAmber(), 0.9, audit.unit_id);
-        SetAuditDisplay(Format("ESCALATED unit %d", audit.unit_id));
+        if(audit_cancelled_)
+            model_.AddLog("Async Monitor", Format("Unit %d routed to Quality Review after cancellation.", audit.unit_id), "warning");
+        else
+            SetAuditDisplay(Format("ESCALATED unit %d", audit.unit_id));
     }
     else {
         SpawnManufacturingToken("async_to_packaging", VisualTokenKind::AssembledUnit, "U", VizGreen(), 0.9, audit.unit_id);
-        SetAuditDisplay(Format("PASSED unit %d", audit.unit_id));
+        if(audit_cancelled_)
+            model_.AddLog("Async Monitor", Format("Unit %d routed to Packaging after cancellation.", audit.unit_id), "success");
+        else
+            SetAuditDisplay(Format("PASSED unit %d", audit.unit_id));
     }
 }
 
@@ -289,6 +295,8 @@ String VisualizerApp::StatusText() const
 void VisualizerApp::ResetScenario()
 {
     tick_.Kill();
+    if(audit_.IsTransitioning())
+        audit_.CancelActiveTransition();
     running_ = false;
     force_next_review_ = false;
     force_next_reject_ = false;
@@ -305,10 +313,13 @@ void VisualizerApp::ResetScenario()
     generation_accumulator_ = 0.0;
     async_check_accumulator_ = 0.0;
     audit_status_remaining_ = 0.0;
+    audit_armed_ = false;
+    audit_cancelled_ = false;
+    active_audit_ = ActiveAudit();
+    audit_completion_.Clear();
     async_checks_enabled_ = true;
     async_check_toggle_.SetData(true);
     processing_jobs_.Clear();
-    active_audit_ = ActiveAudit();
     next_work_item_id_ = 0;
     accepted_units_ = 0;
     shipped_units_ = 0;
@@ -317,6 +328,7 @@ void VisualizerApp::ResetScenario()
     model_.ResetManufacturingGraph();
     BuildControlMachine();
     BuildAuditMachine();
+    SetAuditDisplay("DORMANT / waiting");
     UpdateNodeStats();
     model_.AddLog("System", "Scenario reset.", "system");
     SyncGraph();
