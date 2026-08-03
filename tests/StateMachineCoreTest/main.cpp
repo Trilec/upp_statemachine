@@ -4655,6 +4655,208 @@ CONSOLE_APP_MAIN
         });
     });
 
+    RunGroup("SM-002 async lifecycle hardening", passed, failed, [&](auto add) {
+        add("No active cancellation is stable", [](TestContext& ctx) {
+            StateMachine sm;
+            ctx.Check(!sm.CancelActiveTransition(), "Idle cancellation should return false");
+            ctx.Check(sm.GetLastError() == StateMachineError::NoActiveTransition, "Idle cancellation should set NoActiveTransition");
+            ctx.Check(sm.GetLastTransitionOutcome() == TransitionOutcome::None, "Idle cancellation should not create a result");
+        });
+
+        add("Startup cancellation settles once and clears runtime", [](TestContext& ctx) {
+            Function<void(bool)> done;
+            int settled = 0;
+            TransitionResult result;
+            StateMachine sm;
+            sm.WhenTransitionSettled = [&](const TransitionResult& r) { ++settled; result = r; };
+            sm.SetInitial("A");
+            sm.AddState({"A", [&](auto&, auto d) { done = pick(d); }, {}});
+            ctx.Check(sm.Start(), "Startup should begin");
+            const uint64 seq = sm.GetActiveTransitionSequence();
+            ctx.Check(sm.CancelActiveTransition(), "Startup cancellation should succeed");
+            ctx.Check(!sm.IsStarted() && sm.GetCurrent().IsEmpty() && sm.GetHistoryCount() == 0, "Startup cancellation should roll back runtime");
+            ctx.Check(settled == 1 && result.sequence == seq && result.operation == TransitionOperationKind::Start && result.outcome == TransitionOutcome::Cancelled, "Startup should settle exactly once as cancelled");
+            done(true); done(false);
+            ctx.Check(settled == 1 && sm.GetHistoryCount() == 0, "Late startup completions should be inert");
+        });
+
+        add("Exit cancellation preserves source history and queue", [](TestContext& ctx) {
+            Function<void(bool)> exit_done;
+            int settled = 0;
+            StateMachine sm;
+            sm.SetInitial("A");
+            sm.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
+            sm.AddState({"A", [](auto&, auto d) { d(true); }, [&](auto&, auto d) { exit_done = pick(d); }});
+            sm.AddState({"B", [](auto&, auto d) { d(true); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+            sm.WhenTransitionSettled = [&](const TransitionResult& r) { if (r.outcome == TransitionOutcome::Cancelled) ++settled; };
+            sm.Start();
+            sm.TriggerEvent("go");
+            sm.TriggerEvent("go");
+            const int history = sm.GetHistoryCount();
+            ctx.Check(sm.CancelActiveTransition(), "Exit cancellation should succeed");
+            ctx.Check(sm.GetCurrent() == "A" && sm.GetHistoryCount() == history && sm.GetQueuedEventCount() == 1, "Exit cancellation should preserve source and queue");
+            exit_done(true); exit_done(false);
+            ctx.Check(settled == 1 && sm.GetCurrent() == "A" && sm.GetQueuedEventCount() == 1, "Late exit completion should not drain queue");
+        });
+
+        add("Enter cancellation preserves source and rejects late enter", [](TestContext& ctx) {
+            Function<void(bool)> enter_done;
+            int finished = 0, after = 0, settled = 0;
+            StateMachine sm;
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto d) { d(true); }, {}});
+            sm.AddState({"B", [&](auto&, auto d) { enter_done = pick(d); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+            sm.WhenTransitionFinished = [&](const auto&) { ++finished; };
+            sm.WhenTransitionSettled = [&](const auto& r) { if (r.outcome == TransitionOutcome::Cancelled) ++settled; };
+            Transition t{"go", "A", "B", {}, {}, [&](const auto&) { ++after; }};
+            sm.Start();
+            sm.TryTransition(t);
+            ctx.Check(sm.CancelActiveTransition(), "Enter cancellation should succeed");
+            enter_done(true); enter_done(false);
+            ctx.Check(sm.GetCurrent() == "A" && finished == 0 && after == 0 && settled == 1, "Late enter completion must be inert");
+        });
+
+        add("Transition sequences and stale A completion cannot affect B", [](TestContext& ctx) {
+            Function<void(bool)> exit_a, exit_b;
+            TransitionResult last;
+            StateMachine sm;
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto d) { d(true); }, [&](auto&, auto d) { exit_a = pick(d); }});
+            sm.AddState({"B", [](auto&, auto d) { d(true); }, [&](auto&, auto d) { exit_b = pick(d); }});
+            sm.AddState({"C", [](auto&, auto d) { d(true); }, {}});
+            sm.AddTransition({"ab", "A", "B"});
+            sm.AddTransition({"bc", "B", "C"});
+            sm.WhenTransitionSettled = [&](const auto& r) { last = r; };
+            sm.Start(); sm.TriggerEvent("ab");
+            const uint64 seq_a = sm.GetActiveTransitionSequence();
+            Function<void(bool)> stale_a = exit_a;
+            sm.CancelActiveTransition();
+            ctx.Check(sm.Reset(), "Reset after cancellation should succeed");
+            sm.Start(); sm.TriggerEvent("ab");
+            const uint64 seq_b = sm.GetActiveTransitionSequence();
+            ctx.Check(seq_b > seq_a, "Sequence should increase monotonically");
+            stale_a(true);
+            ctx.Check(sm.GetCurrent() == "A" && sm.GetActiveTransitionSequence() == seq_b, "Stale A completion must not affect B");
+            exit_a(true); exit_b(true);
+            ctx.Check(last.sequence == seq_b && sm.GetCurrent() == "B", "B remains authoritative after stale completion");
+        });
+
+        add("Cancelled GoBack preserves history without back failure", [](TestContext& ctx) {
+            Function<void(bool)> back_exit;
+            int back_failures = 0;
+            StateMachine sm;
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto d) { d(true); }, {}});
+            sm.AddState({"B", [](auto&, auto d) { d(true); }, [&](auto&, auto d) { back_exit = pick(d); }});
+            sm.AddTransition({"go", "A", "B"});
+            sm.Start();
+            sm.TriggerEvent("go");
+            const int history = sm.GetHistoryCount();
+            sm.WhenTransitionSettled = [&](const auto& r) { if (r.outcome == TransitionOutcome::FailedBack) ++back_failures; };
+            ctx.Check(sm.GoBack(), "GoBack should begin");
+            ctx.Check(sm.CancelActiveTransition(), "Back cancellation should succeed");
+            back_exit(true);
+            ctx.Check(sm.GetCurrent() == "B" && sm.GetHistoryCount() == history && back_failures == 0 && sm.GetLastTransitionOutcome() == TransitionOutcome::Cancelled, "Cancelled back must preserve state/history");
+        });
+
+        add("Settled result remains stable after late callbacks and reset", [](TestContext& ctx) {
+            Function<void(bool)> exit_done;
+            TransitionResult settled;
+            StateMachine sm;
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto d) { d(true); }, [&](auto&, auto d) { exit_done = pick(d); }});
+            sm.AddState({"B", [](auto&, auto d) { d(true); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+            sm.WhenTransitionSettled = [&](const auto& r) { settled = r; };
+            sm.Start(); sm.TriggerEvent("go");
+            const uint64 seq = sm.GetActiveTransitionSequence();
+            sm.CancelActiveTransition();
+            const TransitionResult cancelled = sm.GetLastTransitionResult();
+            ctx.Check(sm.Reset(), "Reset after cancellation should succeed");
+            exit_done(true); exit_done(false);
+            ctx.Check(sm.GetLastTransitionResult().sequence == cancelled.sequence && sm.GetLastTransitionOutcome() == TransitionOutcome::Cancelled && settled.sequence == seq, "Late callbacks must not overwrite last result");
+        });
+
+        add("Repeated completion and cancellation settle exactly once", [](TestContext& ctx) {
+            Function<void(bool)> done;
+            int settled = 0, finished = 0;
+            StateMachine sm;
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto d) { d(true); }, {}});
+            sm.AddState({"B", [&](auto&, auto d) { done = pick(d); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+            sm.WhenTransitionFinished = [&](const auto&) { ++finished; };
+            sm.WhenTransitionSettled = [&](const auto&) { ++settled; };
+            sm.Start();
+            settled = 0;
+            finished = 0;
+            sm.TriggerEvent("go");
+            done(true); done(true); done(false);
+            ctx.Check(settled == 1 && finished == 1 && sm.GetCurrent() == "B", "Repeated completion should settle once");
+            ctx.Check(!sm.CancelActiveTransition() && sm.GetLastError() == StateMachineError::NoActiveTransition, "Cancellation after settlement should be idle");
+        });
+
+        add("Pending completion after destruction is harmless", [](TestContext& ctx) {
+            Function<void(bool)> done;
+            {
+                StateMachine sm;
+                sm.SetInitial("A");
+                sm.AddState({"A", [&](auto&, auto d) { done = pick(d); }, {}});
+                sm.Start();
+            }
+            done(true); done(false);
+            ctx.Check(true, "Completion after destruction returned safely");
+        });
+
+        add("Cancellation followed by Clear rejects stale completion", [](TestContext& ctx) {
+            Function<void(bool)> done;
+            StateMachine sm;
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto d) { d(true); }, {}});
+            sm.AddState({"B", [&](auto&, auto d) { done = pick(d); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+            sm.Start(); sm.TriggerEvent("go");
+            ctx.Check(sm.CancelActiveTransition(), "Cancellation should succeed");
+            ctx.Check(sm.Clear(), "Clear after cancellation should succeed");
+            done(true); done(false);
+            ctx.Check(sm.GetStateCount() == 0 && sm.GetCurrent().IsEmpty() && sm.GetLastTransitionOutcome() == TransitionOutcome::Cancelled, "Stale callback after Clear should be inert");
+        });
+
+        add("Cancelled startup clears queued startup events", [](TestContext& ctx) {
+            Function<void(bool)> done;
+            StateMachine sm;
+            sm.SetInitial("A");
+            sm.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
+            sm.AddState({"A", [&](auto&, auto d) { done = pick(d); }, {}});
+            sm.AddState({"B", [](auto&, auto d) { d(true); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+            sm.Start();
+            ctx.Check(sm.TriggerEvent("go"), "Startup event should queue");
+            ctx.Check(sm.GetQueuedEventCount() == 1, "Startup queue should retain event while pending");
+            sm.CancelActiveTransition();
+            ctx.Check(sm.GetQueuedEventCount() == 0 && !sm.IsStarted(), "Cancelled startup should clear startup queue");
+            done(true);
+        });
+
+        add("Repeated cancellation and stale completion stress remains stable", [](TestContext& ctx) {
+            for (int i = 0; i < 1000; ++i) {
+                Function<void(bool)> done;
+                StateMachine sm;
+                sm.SetInitial("A");
+                sm.AddState({"A", [](auto&, auto d) { d(true); }, {}});
+                sm.AddState({"B", [&](auto&, auto d) { done = pick(d); }, {}});
+                sm.AddTransition({"go", "A", "B"});
+                sm.Start();
+                sm.TriggerEvent("go");
+                ctx.Check(sm.CancelActiveTransition(), "Stress cancellation should succeed");
+                done(true); done(false); done(true);
+                ctx.Check(sm.GetCurrent() == "A" && !sm.IsTransitioning() && sm.GetHistoryCount() == 1, "Stress stale completion should not corrupt state");
+            }
+        });
+    });
+
     Cout() << "\n----------------------------------------\n";
     Cout() << "StateMachineCoreTest summary\n";
     Cout() << "Passed: " << passed << "\n";

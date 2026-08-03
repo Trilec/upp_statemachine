@@ -263,12 +263,12 @@ bool StateMachine::Start() {
             return;
         }
 
-        Settle(op, TransitionOutcome::FailedStart, false);
         started = false;
         current.Clear();
         transitionHistory.Clear();
         queued_events.Clear();
         last_error = StateMachineError::StartEnterFailed;
+        Settle(op, TransitionOutcome::FailedStart, false);
     };
 
     if (init->OnEnter)
@@ -577,8 +577,10 @@ bool StateMachine::DoTransition(const Transition& t, bool record, TransitionOper
         if (success) {
             if (toState && toState->OnEnter) {
                 *enter_started = true;
-                toState->OnEnter(*this, [this, ctx, on_enter_done, enter_finished](bool enter_success) {
+                toState->OnEnter(*this, [this, weak_lifetime, op, ctx, on_enter_done, enter_finished](bool enter_success) {
                     if (*enter_finished)
+                        return;
+                    if (weak_lifetime.expired() || active_operation != op || op->settled)
                         return;
                     if (enter_success)
                         current = ctx.toState;
