@@ -79,6 +79,7 @@ VisualizerApp::VisualizerApp()
     Add(force_review_btn_);
     Add(force_reject_btn_);
     Add(reset_btn_);
+    Add(run_audit_btn_);
     Add(speed_slider_);
     Add(ingest_slider_);
     Add(review_slider_);
@@ -115,6 +116,7 @@ VisualizerApp::VisualizerApp()
     force_review_btn_.SetText("Force Review");
     force_reject_btn_.SetText("Force Reject");
     reset_btn_.SetText("Reset");
+    run_audit_btn_.SetText("Run spot check now");
     async_check_toggle_.SetText("Auto lifecycle checks");
     async_check_toggle_.SetData(true);
 
@@ -155,6 +157,7 @@ VisualizerApp::VisualizerApp()
         SyncGraph();
     };
     reset_btn_.WhenAction = [=] { ResetScenario(); };
+    run_audit_btn_.WhenAction = [=] { ArmSpotCheck(); };
 
     speed_slider_.WhenAction = [=] {
         model_.AddLog("Config", Format("Flow speed set to %.2fx.", speed_slider_.GetValue()), "system");
@@ -175,13 +178,16 @@ VisualizerApp::VisualizerApp()
         package_size_ = (int)package_slider_.GetValue();
         model_.AddLog("Config", Format("Package size set to %d.", package_size_), "system");
     };
-    async_check_toggle_.WhenAction = [=] { async_checks_enabled_ = (bool)async_check_toggle_.GetData(); };
+    async_check_toggle_.WhenAction = [=] {
+        async_checks_enabled_ = (bool)async_check_toggle_.GetData();
+        if(!async_checks_enabled_)
+            CancelSpotCheck();
+    };
 
     graph_.SetModel(&model_);
     log_.SetModel(&model_);
     UpdateMetrics();
     ResetScenario();
-    RunAsyncLifecycleDemo();
     last_tick_ms_ = (double)msecs();
     tick_.Set(16, [=] { UpdateFrame(); });
 }
@@ -198,42 +204,39 @@ void VisualizerApp::BuildControlMachine()
         model_.AddLog("FSM", control_.GetLastErrorText(), "alert");
 }
 
-void VisualizerApp::RunAsyncLifecycleDemo()
+void VisualizerApp::BuildAuditMachine()
 {
-    StateMachine demo;
-    Function<void(bool)> late_completion;
-    TransitionResult settled;
-    int settlements = 0;
+    audit_.Clear();
+    audit_completion_.Clear();
+    audit_.SetInitial("DORMANT");
+    audit_.AddState({"DORMANT", [](StateMachine&, Function<void(bool)> done) { done(true); }, {}});
+    audit_.AddState({"AUDITING", [&](StateMachine&, Function<void(bool)> done) { audit_completion_ = done; }, {}});
+    audit_.AddTransition({"audit", "DORMANT", "AUDITING"});
+    audit_.AddTransition({"complete", "AUDITING", "DORMANT"});
+    audit_.Start();
+}
 
-    demo.SetInitial("Idle");
-    demo.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
-    demo.AddState({"Idle", [](StateMachine&, Function<void(bool)> done) { done(true); },
-                   [&](StateMachine&, Function<void(bool)> done) { late_completion = done; }});
-    demo.AddState({"Working", [](StateMachine&, Function<void(bool)> done) { done(true); }, {}});
-    demo.AddTransition({"begin", "Idle", "Working"});
-    demo.WhenTransitionSettled = [&](const TransitionResult& result) {
-        ++settlements;
-        settled = result;
-    };
-
-    demo.Start();
-    demo.TriggerEvent("begin");
-    const uint64 active_sequence = demo.GetActiveTransitionSequence();
-    demo.TriggerEvent("begin"); // Demonstrates retained queue behaviour.
-    bool cancelled = demo.CancelActiveTransition();
-    late_completion(true);       // Must be stale and inert.
-
-    bool passed = cancelled && settlements == 2 && settled.sequence == active_sequence &&
-                  settled.outcome == TransitionOutcome::Cancelled && demo.GetCurrent() == "Idle" &&
-                  demo.GetQueuedEventCount() == 1;
-    model_.AddLog("Lifecycle", Format("Auto-check: sequence=%lld cancelled=%d stale completion ignored=%d queue=%d",
-        (int64)active_sequence, (int)cancelled, (int)passed, demo.GetQueuedEventCount()),
-        passed ? "success" : "alert");
+void VisualizerApp::ArmSpotCheck()
+{
+    if(audit_.IsTransitioning() || audit_armed_)
+        return;
+    audit_armed_ = true;
     if(VisualNodeSpec* monitor = model_.FindNode("ASYNC_MONITOR")) {
         monitor->active = true;
-        monitor->copy = passed ? "Cancelled / stale ignored" : "Check failed";
+        monitor->copy = "ARMED / waiting for unit";
     }
-    async_monitor_remaining_ = 0.9;
+    model_.AddLog("Async Monitor", "ARMED — waiting for one Quality Check unit.", "system");
+}
+
+void VisualizerApp::CancelSpotCheck()
+{
+    audit_armed_ = false;
+    if(audit_.IsTransitioning()) {
+        audit_cancelled_ = audit_.CancelActiveTransition();
+        if(VisualNodeSpec* monitor = model_.FindNode("ASYNC_MONITOR"))
+            monitor->copy = "CANCELLED — late result ignored";
+        model_.AddLog("Async Monitor", "CANCELLED — late result will be ignored.", "warning");
+    }
 }
 
 void VisualizerApp::SetControlStyle()
@@ -279,6 +282,7 @@ void VisualizerApp::ResetScenario()
 
     model_.ResetManufacturingGraph();
     BuildControlMachine();
+    BuildAuditMachine();
     UpdateNodeStats();
     model_.AddLog("System", "Scenario reset.", "system");
     SyncGraph();
@@ -396,7 +400,7 @@ void VisualizerApp::ProcessArrival(const VisualToken& token)
     else if(token.kind == VisualTokenKind::ShipmentBatch && e->to == "SHIPPING") {
         node->shipping++;
         model_.completed_shipments++;
-        shipped_units_ += 5;
+        shipped_units_ += package_size_;
         model_.AddLog("Shipping", "Shipment batch completed.", "success");
     }
     else if(token.kind == VisualTokenKind::RecycledPartA && e->to == "ASSEMBLY") {
@@ -418,7 +422,7 @@ void VisualizerApp::ProcessArrival(const VisualToken& token)
             p->packaging_buffer++;
             model_.accepted_units_waiting++;
             accepted_units_++;
-            model_.AddLog("Packaging", Format("Packaging buffer %d / 5", p->packaging_buffer), "system");
+            model_.AddLog("Packaging", Format("Packaging buffer %d / %d", p->packaging_buffer, package_size_), "system");
             if(p->packaging_buffer >= package_size_) {
                 p->packaging_buffer -= package_size_;
                 model_.accepted_units_waiting = max(0, model_.accepted_units_waiting - package_size_);
@@ -437,10 +441,14 @@ void VisualizerApp::ProcessCheckResult(int work_item_id, bool force_review)
         n->assembled--;
         model_.units_checking = max(0, model_.units_checking - 1);
     }
-    bool sampled = async_checks_enabled_ && Random(100) < 30;
-    if(sampled) {
+    if(audit_armed_ && audit_.TriggerEvent("audit")) {
+        audit_armed_ = false;
+        audit_cancelled_ = false;
+        audit_unit_id_ = work_item_id;
+        if(VisualNodeSpec* monitor = model_.FindNode("ASYNC_MONITOR"))
+            monitor->copy = Format("CHECKING unit %d", work_item_id);
         SpawnManufacturingToken("check_to_async_monitor", VisualTokenKind::AssembledUnit, "U", VizCyan(), 0.85, work_item_id);
-        model_.AddLog("Quality Check", Format("[Unit %d] Sent to Async Monitor.", work_item_id), "system");
+        model_.AddLog("Quality Check", Format("[Unit %d] selected for spot check.", work_item_id), "system");
         return;
     }
     bool review = force_review || Random(100) < review_probability_;
@@ -462,8 +470,6 @@ void VisualizerApp::ProcessReviewResult(int work_item_id)
         n->under_review--;
         model_.units_under_review = max(0, model_.units_under_review - 1);
     }
-    if(VisualNodeSpec* n = model_.FindNode("ASYNC_MONITOR"))
-        n->active = n->assembled > 0 || async_monitor_remaining_ > 0.0;
     bool rejected = force_next_reject_ || Random(100) < reject_probability_;
     force_next_reject_ = false;
     if(rejected) {
@@ -557,7 +563,7 @@ void VisualizerApp::UpdateFrame()
         async_check_accumulator_ += dt;
         if(async_check_accumulator_ >= async_check_slider_.GetValue()) {
             async_check_accumulator_ = 0.0;
-            RunAsyncLifecycleDemo();
+            ArmSpotCheck();
         }
     }
 
@@ -594,10 +600,20 @@ void VisualizerApp::TickProcessing()
         case ProcessingStage::QualityReview:
             ProcessReviewResult(job.work_item_id);
             break;
-        case ProcessingStage::AsyncMonitor:
+        case ProcessingStage::AsyncMonitor: {
             if(VisualNodeSpec* n = model_.FindNode("ASYNC_MONITOR"))
                 n->assembled = max(0, n->assembled - 1);
-            if(Random(100) < 78) {
+            if(audit_cancelled_) {
+                audit_completion_(true);
+                model_.AddLog("Async Monitor", Format("[Unit %d] late result ignored after cancellation.", job.work_item_id), "warning");
+                break;
+            }
+            if(audit_.IsTransitioning())
+                audit_completion_(true);
+            audit_.TriggerEvent("complete");
+            bool review = force_next_review_ || Random(100) < review_probability_;
+            force_next_review_ = false;
+            if(!review) {
                 SpawnManufacturingToken("async_to_packaging", VisualTokenKind::AssembledUnit, "U", VizGreen(), 0.9, job.work_item_id);
                 model_.AddLog("Async Monitor", Format("[Unit %d] Approved for packaging.", job.work_item_id), "success");
             }
@@ -606,6 +622,7 @@ void VisualizerApp::TickProcessing()
                 model_.AddLog("Async Monitor", Format("[Unit %d] Escalated to quality review.", job.work_item_id), "warning");
             }
             break;
+        }
         case ProcessingStage::Disassembly:
             ProcessDisassemblyResult(job.work_item_id);
             break;
@@ -636,6 +653,8 @@ void VisualizerApp::UpdateNodeStats()
         n->under_review = model_.units_under_review;
         n->active = n->under_review > 0;
     }
+    if(VisualNodeSpec* n = model_.FindNode("ASYNC_MONITOR"))
+        n->active = n->assembled > 0 || audit_armed_ || audit_.IsTransitioning();
     if(VisualNodeSpec* n = model_.FindNode("PACKAGING")) {
         n->packaging_buffer = model_.accepted_units_waiting;
         n->active = n->packaging_buffer > 0;
@@ -712,6 +731,7 @@ void VisualizerApp::Layout()
     force_review_btn_.SetRect(x, y, DPI(112), DPI(30)); x += DPI(120);
     force_reject_btn_.SetRect(x, y, DPI(112), DPI(30)); x += DPI(120);
     reset_btn_.SetRect(x, y, DPI(82), DPI(30));
+    run_audit_btn_.SetRect(DPI(840), y, DPI(150), DPI(30));
 
     int row_y = header_h + DPI(48);
     int col_x = DPI(18);

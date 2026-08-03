@@ -420,14 +420,15 @@ bool StateMachine::TriggerEvent(const String& e) {
         return false;
     }
 
-    const Transition* t = FindTransition(current, e);
-    if (!t) {
+    const Transition* found = FindTransition(current, e);
+    if (!found) {
         last_error = StateMachineError::NoMatchingTransition;
         return false;
     }
 
-    const State* from_state = FindState(t->from);
-    const State* to_state = FindState(t->to);
+    const Transition t = *found;
+    const State* from_state = FindState(t.from);
+    const State* to_state = FindState(t.to);
     if (!from_state) {
         last_error = StateMachineError::MissingFromState;
         return false;
@@ -437,13 +438,22 @@ bool StateMachine::TriggerEvent(const String& e) {
         return false;
     }
 
-    TransitionContext ctx(*this, t->from, t->to, t->event);
-    if (t->Guard && !t->Guard(ctx)) {
+    const String source_before_guard = current;
+    const uint64 guard_ticket = ++guard_generation;
+    Ptr<Lifetime> guard_lifetime(lifetime.Get());
+    auto guard = t.Guard;
+    TransitionContext ctx(*this, t.from, t.to, t.event);
+    if (guard && !guard(ctx)) {
+        if (!guard_lifetime || guard_lifetime->owner != this)
+            return false;
         last_error = StateMachineError::GuardRejected;
         return false;
     }
+    if (!guard_lifetime || guard_lifetime->owner != this || guard_generation != guard_ticket ||
+        !started || transitioning || current != source_before_guard || current != t.from)
+        return false;
 
-    if (!DoTransition(*t)) {
+    if (!DoTransition(t)) {
         return false;
     }
     return true;
@@ -462,27 +472,28 @@ bool StateMachine::TryTransition(const Transition& t) {
         return false;
     }
 
-    if (t.event.IsEmpty()) {
+    const Transition transition = t;
+    if (transition.event.IsEmpty()) {
         last_error = StateMachineError::EmptyEvent;
         return false;
     }
 
-    if (t.from.IsEmpty()) {
+    if (transition.from.IsEmpty()) {
         last_error = StateMachineError::EmptyFromState;
         return false;
     }
 
-    if (t.to.IsEmpty()) {
+    if (transition.to.IsEmpty()) {
         last_error = StateMachineError::EmptyToState;
         return false;
     }
 
-    if (!FindState(t.from)) {
+    if (!FindState(transition.from)) {
         last_error = StateMachineError::MissingFromState;
         return false;
     }
 
-    if (!FindState(t.to)) {
+    if (!FindState(transition.to)) {
         last_error = StateMachineError::MissingToState;
         return false;
     }
@@ -492,18 +503,27 @@ bool StateMachine::TryTransition(const Transition& t) {
         return false;
     }
 
-    if (t.from != current) {
+    if (transition.from != current) {
         last_error = StateMachineError::WrongSourceState;
         return false;
     }
 
-    TransitionContext ctx(*this, t.from, t.to, t.event);
-    if (t.Guard && !t.Guard(ctx)) {
+    const String source_before_guard = current;
+    const uint64 guard_ticket = ++guard_generation;
+    Ptr<Lifetime> guard_lifetime(lifetime.Get());
+    auto guard = transition.Guard;
+    TransitionContext ctx(*this, transition.from, transition.to, transition.event);
+    if (guard && !guard(ctx)) {
+        if (!guard_lifetime || guard_lifetime->owner != this)
+            return false;
         last_error = StateMachineError::GuardRejected;
         return false;
     }
+    if (!guard_lifetime || guard_lifetime->owner != this || guard_generation != guard_ticket ||
+        !started || transitioning || current != source_before_guard || current != transition.from)
+        return false;
 
-    if (!DoTransition(t)) {
+    if (!DoTransition(transition)) {
         return false;
     }
     return true;
@@ -682,6 +702,7 @@ void StateMachine::DrainQueuedEvents() {
         return;
 
     processing_queue = true;
+    Ptr<Lifetime> drain_lifetime(lifetime.Get());
     const int drain_limit = max_queued_events > 0 ? max_queued_events : 0;
     int drain_steps = 0;
     while (!queued_events.IsEmpty() && started && !transitioning) {
@@ -693,8 +714,13 @@ void StateMachine::DrainQueuedEvents() {
         queued_events.Remove(0);
         ++drain_steps;
         const uint64 sequence_before = next_sequence;
-        if (!TriggerEvent(event))
+        if (!TriggerEvent(event)) {
+            if (!drain_lifetime || drain_lifetime->owner != this)
+                return;
             break;
+        }
+        if (!drain_lifetime || drain_lifetime->owner != this)
+            return;
         if (transitioning)
             break;
         if (last_result.sequence > sequence_before && last_result.outcome == TransitionOutcome::Cancelled)

@@ -64,6 +64,40 @@ An AddressSanitizer CLANGx64 run was not performed in this local pass because no
 confirmed U++ CLANGx64 ASan build configuration/link flags were available; it
 remains a recommended follow-up rather than a substituted result.
 
+## SM-002-R2 continuation
+
+R2 begins at commit `8eb4be821cfbea385ec7a52e683430d4fed1c573` and retains the
+accepted completion observer (`One<Operation>`, `Pte<Operation>`,
+`Ptr<Operation>`). No shared ownership, custom reference counting, registry,
+thread, lock, or scheduler was introduced.
+
+Implemented and validated in the reusable core:
+
+- `TriggerEvent()` and `TryTransition()` copy transition/guard data before
+  invocation, acquire a `Ptr<Lifetime>` observer, and use a monotonic guard
+  preflight generation plus source-state check. A guard that resets, clears,
+  destroys the owner, or causes a nested guard/transition cannot leave the outer
+  dispatch continuing against stale state.
+- Guard evaluation remains before accepted-operation creation, so it still
+  observes `IsTransitioning()==false`; rejected guards do not publish settlement.
+- `DrainQueuedEvents()` retains a lifetime observer across every nested
+  `TriggerEvent()`. Destruction during a queued callback returns immediately and
+  does not touch queue state or dispatch a second event.
+- Added deterministic tests for guard reset invalidation, guard destruction for
+  both `TriggerEvent` and `TryTransition`, and owner destruction during queued
+  dispatch. Debug-heap Core result is now **221/221 passed**.
+
+Visualizer R2 work changes the previous repetitive self-test / fixed-route demo
+to a persistent example-owned audit StateMachine (`DORMANT` and `AUDITING`). It
+arms at an interval or through `Run spot check now`, samples one eligible Quality
+Check unit, performs asynchronous inspection, then uses the configured ordinary
+pass/review policy to route it. Cancellation records a late-result-ignored event.
+This remains example-only; no timer or GUI concept enters `statemachine`.
+
+Current handoff status: Core debug-heap and StateMachineGuiTest builds are green.
+The final Visualizer smoke test, remaining result-matrix additions, documentation
+consolidation, diff/status checks, and local R2 commit still need completion.
+
 ## Original review request and investigation record
 
 Please review the asynchronous completion-callback ownership design in

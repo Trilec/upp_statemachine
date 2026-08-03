@@ -304,6 +304,7 @@ namespace Upp {
 	    One<Operation> active_operation;
 	    TransitionResult last_result;
 	    uint64 next_sequence = 0;
+	    uint64 guard_generation = 0;
 	    One<Lifetime> lifetime;
 	};
 

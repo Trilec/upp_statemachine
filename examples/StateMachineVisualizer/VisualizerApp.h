@@ -55,7 +55,9 @@ public:
 
 private:
     void BuildControlMachine();
-    void RunAsyncLifecycleDemo();
+    void BuildAuditMachine();
+    void ArmSpotCheck();
+    void CancelSpotCheck();
     void ResetScenario();
     void ToggleRunPause();
     void InjectPartA();
@@ -81,6 +83,8 @@ private:
 private:
     VisualizerModel model_;
     StateMachine control_;
+    StateMachine audit_;
+    Function<void(bool)> audit_completion_;
     bool running_ = false;
     bool force_next_review_ = false;
     bool force_next_reject_ = false;
@@ -97,6 +101,9 @@ private:
     double async_check_accumulator_ = 0.0;
     double async_monitor_remaining_ = 0.0;
     bool async_checks_enabled_ = true;
+    bool audit_armed_ = false;
+    bool audit_cancelled_ = false;
+    int audit_unit_id_ = 0;
     Array<ProcessingJob> processing_jobs_;
     TimeCallback tick_;
 
@@ -110,6 +117,7 @@ private:
     UiButton force_review_btn_;
     UiButton force_reject_btn_;
     UiButton reset_btn_;
+    UiButton run_audit_btn_;
 
     UiSlider speed_slider_;
     UiSlider ingest_slider_;

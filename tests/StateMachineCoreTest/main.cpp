@@ -4712,6 +4712,54 @@ CONSOLE_APP_MAIN
     });
 
     RunGroup("SM-002-R1 re-entrant lifecycle hardening", passed, failed, [&](auto add) {
+        add("Guard invalidation stops stale TriggerEvent and TryTransition", [](TestContext& ctx) {
+            for(bool direct : { false, true }) {
+                StateMachine sm;
+                sm.SetInitial("A");
+                sm.AddState({"A", [](auto&, auto d) { d(true); }, {}});
+                sm.AddState({"B", [](auto&, auto d) { d(true); }, {}});
+                Transition t{"go", "A", "B", [&](const TransitionContext&) { sm.Reset(); return true; }};
+                sm.AddTransition(t);
+                sm.Start();
+                bool accepted = direct ? sm.TryTransition(t) : sm.TriggerEvent("go");
+                ctx.Check(!accepted && !sm.IsStarted() && sm.GetCurrent().IsEmpty(), "Guard Reset must invalidate the outer dispatch");
+            }
+        });
+
+        add("Guard destruction is safe for TriggerEvent and TryTransition", [](TestContext& ctx) {
+            for(bool direct : { false, true }) {
+                std::unique_ptr<StateMachine> owner(new StateMachine);
+                StateMachine* raw = owner.get();
+                raw->SetInitial("A");
+                raw->AddState({"A", [](auto&, auto d) { d(true); }, {}});
+                raw->AddState({"B", [](auto&, auto d) { d(true); }, {}});
+                Transition t{"go", "A", "B", [&](const TransitionContext&) { owner.reset(); return true; }};
+                raw->AddTransition(t);
+                raw->Start();
+                if(direct)
+                    raw->TryTransition(t);
+                else
+                    raw->TriggerEvent("go");
+                ctx.Check(owner == nullptr, "Guard should be able to destroy its owner without stale continuation");
+            }
+        });
+
+        add("Queued dispatch destruction returns without another event", [](TestContext& ctx) {
+            std::unique_ptr<StateMachine> owner(new StateMachine);
+            StateMachine* raw = owner.get();
+            raw->SetInitial("A");
+            raw->SetEventPolicy(EventPolicy::QueueWhileTransitioning);
+            Function<void(bool)> exit_done;
+            raw->AddState({"A", [](auto&, auto d) { d(true); }, [&](auto&, auto d) { exit_done = d; }});
+            raw->AddState({"B", [](auto&, auto d) { d(true); }, {}});
+            raw->AddState({"C", [](auto&, auto d) { d(true); }, {}});
+            raw->AddTransition({"go", "A", "B"});
+            raw->AddTransition({"destroy", "B", "C", {}, [&](const TransitionContext&) { owner.reset(); }});
+            raw->Start(); raw->TriggerEvent("go"); raw->TriggerEvent("destroy");
+            exit_done(true);
+            ctx.Check(owner == nullptr, "Queued dispatch destruction should end the drain safely");
+        });
+
         add("WhenTransitionStarted cancellation stops before exit", [](TestContext& ctx) {
             int exits = 0, enters = 0, settled = 0;
             StateMachine sm;

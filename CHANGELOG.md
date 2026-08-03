@@ -85,3 +85,5 @@ Initial compact U++ state machine release.
   exact-once settlement, cancellation outcomes, and re-entrant destruction
   checks.
 - Added deterministic debug-heap callback-lifetime coverage.
+- Hardened guard preflight and queued dispatch against re-entrant destruction.
+- Updated the Visualizer example with a pulsed, one-item audit demonstration.

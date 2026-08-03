@@ -435,3 +435,10 @@ Completion callbacks observe the active operation through U++ `Ptr`; after the
 operation is cancelled, settled, or its machine is destroyed they do nothing.
 Hooks are copied before invocation. A hook may destroy its StateMachine, but
 client code must not use a previously saved raw machine pointer afterward.
+
+`CancelActiveTransition()`, `HasActiveTransition()`, active/last sequence
+queries, `GetLastTransitionResult()`, `GetLastTransitionOutcome()`, and
+`WhenTransitionSettled` provide the lifecycle result API. Guards are protected
+preflight callbacks: they run before an operation is accepted and are not
+settled results when rejected. Timeout policy and external side effects remain
+caller-owned.

@@ -149,3 +149,9 @@ The machine owns an active `One<Operation>` and `Operation` derives from
 callback phase only; it never owns or retains the StateMachine. A separate
 `Lifetime` observer guards post-hook processing after user code may destroy the
 machine. No thread safety is implied.
+
+Guard invocation has a separate preflight generation and lifetime observer. This
+keeps `IsTransitioning()` false while a guard runs, while rejecting stale outer
+continuation after nested work, reset, clear, or destruction. Queue draining
+holds a lifetime observer around each dispatch and returns without further
+member access when a callback destroys the machine.

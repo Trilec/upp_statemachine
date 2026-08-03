@@ -162,3 +162,10 @@ StateMachine-provided `done(bool)` callbacks may be retained and invoked after
 cancellation, settlement, reset, clear, or StateMachine destruction; stale
 callbacks are ignored. This is a same-thread/same-callback-chain contract.
 Caller-owned callback storage and captures remain caller-owned.
+
+Guards are evaluated before a transition becomes active, so they observe no
+transition in progress. Their function and transition data are copied and their
+continuation is invalidated if they reset, clear, destroy, or otherwise change
+the machine. Queue draining likewise stops immediately if a queued callback
+destroys the machine. Successful startup commits its `__start` history record
+only after the initial entry callback succeeds.
