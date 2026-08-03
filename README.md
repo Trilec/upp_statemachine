@@ -130,8 +130,9 @@ A successful return from `Start()` or `TriggerEvent()` means the operation was
 accepted; it does not mean asynchronous work has already completed.
 
 The current implementation assumes same-thread, same-callback-chain use and
-does not provide internal locking. The `StateMachine` object must outlive any
-pending asynchronous completion callback.
+does not provide internal locking. StateMachine-supplied completion callbacks
+are safe after cancellation and destruction; arbitrary caller-owned captures
+remain caller-owned. `StateMachine` is non-copyable and non-movable.
 
 ## Documentation
 
@@ -142,7 +143,7 @@ pending asynchronous completion callback.
 ## Current boundaries
 
 - flat states only; hierarchical states are not implemented
-- transition cancellation is not implemented
+- active transition cancellation with structured outcomes and stale-completion rejection
 - queueing is event-name-only and single-threaded
 - the GUI examples are optional and do not add GUI dependencies to the core package
 

@@ -274,8 +274,9 @@ wins and duplicate completions are ignored.
 completed.
 
 The current implementation assumes same-thread, same-callback-chain use unless
-the API explicitly says otherwise. Pending async callbacks hold a live
-reference to the machine, so the `StateMachine` object must outlive them.
+the API explicitly says otherwise. StateMachine-supplied callbacks validate a
+machine lifetime token and operation identity; arbitrary caller-owned captures
+remain the caller's responsibility.
 
 When startup fails, `GetLastError()` and `GetLastErrorText()` report the
 reason.
@@ -423,8 +424,8 @@ finished.
 
 - Events fired during a transition follow the configured `EventPolicy`.
 - `Start()` uses a synthetic `__start` history record instead of a normal transition event.
-- Async callbacks capture the `StateMachine` object. The caller must ensure the `StateMachine` outlives pending callbacks.
+- StateMachine-supplied callbacks validate a lifetime token and operation identity; arbitrary caller-owned captures remain caller-owned.
 - `GoBack()` uses a synthetic direct transition named `"__back"`.
 - `GoBack()` does not require a registered reverse transition.
 - Queueing is implemented only for queued `TriggerEvent()` event names under `QueueWhileTransitioning`.
-- Transition cancellation is not implemented.
+- `CancelActiveTransition()` cancels only an active/cancellable operation. Once a terminal result is claimed, cancellation returns false and cannot replace it.

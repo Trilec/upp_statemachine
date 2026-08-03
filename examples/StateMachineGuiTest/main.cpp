@@ -222,6 +222,34 @@ struct TestRunner : TopWindow {
         logDisplay.Log("  -> PASSED", LogView::LOG_SUCCESS);
     }
 
+    void Test_AsyncCancellationAndSettlement() {
+        logDisplay.Log("Running: Async Cancellation and Settlement Test", LogView::LOG_HEADER);
+        Function<void(bool)> late_done;
+        int settlements = 0;
+        StateMachine sm;
+        sm.SetInitial("A");
+        sm.AddState({"A", [](auto&, auto done) { done(true); }, {}});
+        sm.AddState({"B", [&](auto&, auto done) { late_done = pick(done); }, {}});
+        sm.AddTransition({"go", "A", "B"});
+        sm.WhenTransitionSettled = [&](const TransitionResult& result) {
+            ++settlements;
+            logDisplay.Log(Format("  settled: sequence=%llu operation=%d outcome=%d", (unsigned long long)result.sequence, (int)result.operation, (int)result.outcome));
+        };
+        sm.Start();
+        const int history_before = sm.GetHistoryCount();
+        sm.TriggerEvent("go");
+        logDisplay.Log(Format("  active sequence=%llu operation=%d", (unsigned long long)sm.GetActiveTransitionSequence(), (int)TransitionOperationKind::Transition));
+        ASSERT(sm.CancelActiveTransition());
+        ASSERT(sm.GetLastTransitionOutcome() == TransitionOutcome::Cancelled);
+        ASSERT(sm.GetCurrent() == "A" && sm.GetHistoryCount() == history_before);
+        late_done(true);
+        late_done(false);
+        ASSERT(settlements == 2);
+        ASSERT(sm.GetCurrent() == "A" && sm.GetHistoryCount() == history_before);
+        logDisplay.Log("  late completion ignored; source/history unchanged.", LogView::LOG_SUCCESS);
+        logDisplay.Log("  -> PASSED", LogView::LOG_SUCCESS);
+    }
+
     // Probes edge cases, including ignored events and failing OnExit.
     void Test_EdgeCases() {
         logDisplay.Log("Running: Edge Cases Test", LogView::LOG_HEADER);
@@ -456,6 +484,7 @@ struct TestRunner : TopWindow {
             RUN_TEST(Test_GuardsAndCallbacks);
             RUN_TEST(Test_HistoryAndGoBack);
             RUN_TEST(Test_AsyncFlow);
+            RUN_TEST(Test_AsyncCancellationAndSettlement);
             RUN_TEST(Test_EdgeCases);
             RUN_TEST(Test_AdvancedHistory);
             RUN_TEST(Test_AdvancedCallbacksAndFailures);

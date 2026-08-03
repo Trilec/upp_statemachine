@@ -89,8 +89,8 @@ alter the reusable library contract.
 - Machine-owned completion callbacks are single-shot.
 - The implementation assumes same-thread, same-callback-chain use and provides
   no internal locking.
-- Pending async callbacks hold a live reference to the machine, so the
-  `StateMachine` object must outlive them.
+- StateMachine-supplied callbacks validate a machine-owned lifetime token and
+  active operation identity; arbitrary caller-owned captures remain caller-owned.
 - History inspection helpers expose recorded entries for tests and diagnostics.
 - Logging is opt-in; normal transition flow is quiet unless enabled.
 - `TryTransition()` requires `t.from == current`.

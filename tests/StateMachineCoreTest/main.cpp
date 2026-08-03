@@ -35,8 +35,14 @@
 
 #include <Core/Core.h>
 #include <statemachine/statemachine.h>
+#include <type_traits>
 
 using namespace Upp;
+
+static_assert(!std::is_copy_constructible<StateMachine>::value, "StateMachine must not be copy constructible");
+static_assert(!std::is_copy_assignable<StateMachine>::value, "StateMachine must not be copy assignable");
+static_assert(!std::is_move_constructible<StateMachine>::value, "StateMachine must not be move constructible");
+static_assert(!std::is_move_assignable<StateMachine>::value, "StateMachine must not be move assignable");
 
 struct TestContext {
     bool passed = true;
@@ -4655,6 +4661,146 @@ CONSOLE_APP_MAIN
         });
     });
 
+    RunGroup("SM-002-R1 re-entrant lifecycle hardening", passed, failed, [&](auto add) {
+        add("WhenTransitionStarted cancellation stops before exit", [](TestContext& ctx) {
+            int exits = 0, enters = 0, settled = 0;
+            StateMachine sm;
+            sm.SetInitial("A");
+            sm.AddState({"A", [&](auto&, auto d) { d(true); }, [&](auto&, auto d) { ++exits; d(true); }});
+            sm.AddState({"B", [&](auto&, auto d) { ++enters; d(true); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+            sm.WhenTransitionStarted = [&](const auto&) { ctx.Check(sm.CancelActiveTransition(), "Started hook cancellation should succeed"); };
+            sm.WhenTransitionSettled = [&](const auto& r) { if (r.outcome == TransitionOutcome::Cancelled) ++settled; };
+            sm.Start();
+            ctx.Check(sm.TriggerEvent("go"), "Transition should be accepted before re-entrant cancellation");
+            ctx.Check(exits == 0 && enters == 0 && settled == 1 && sm.GetCurrent() == "A" && sm.GetHistoryCount() == 1, "Started cancellation should stop the operation");
+        });
+
+        add("OnBefore cancellation supports Reset and Clear", [](TestContext& ctx) {
+            for (bool clear : {false, true}) {
+                int exits = 0;
+                StateMachine sm;
+                sm.SetInitial("A");
+                sm.AddState({"A", [](auto&, auto d) { d(true); }, [&](auto&, auto d) { ++exits; d(true); }});
+                sm.AddState({"B", [](auto&, auto d) { d(true); }, {}});
+                sm.AddTransition({"go", "A", "B"});
+                sm.WhenTransitionStarted = [&](const auto&) {
+                    ctx.Check(sm.CancelActiveTransition(), "OnBefore setup cancellation should succeed");
+                    ctx.Check(clear ? sm.Clear() : sm.Reset(), "Reset/Clear after cancellation should succeed");
+                };
+                sm.Start(); sm.TriggerEvent("go");
+                ctx.Check(exits == 0 && sm.GetCurrent().IsEmpty() && !sm.IsTransitioning(), "Early cancellation must not continue after Reset/Clear");
+            }
+        });
+
+        add("OnExit and OnEnter cancellation reject all late completions", [](TestContext& ctx) {
+            Function<void(bool)> exit_done, enter_done;
+            int settled = 0;
+            StateMachine sm;
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto d) { d(true); }, [&](auto&, auto d) { exit_done = pick(d); }});
+            sm.AddState({"B", [&](auto&, auto d) { enter_done = pick(d); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+            sm.WhenTransitionSettled = [&](const auto& r) { if (r.outcome == TransitionOutcome::Cancelled) ++settled; };
+            sm.Start(); sm.TriggerEvent("go");
+            ctx.Check(sm.CancelActiveTransition(), "Exit cancellation should succeed");
+            exit_done(true); exit_done(false); exit_done(true);
+            ctx.Check(sm.GetCurrent() == "A" && settled == 1, "Late exit completions should be inert");
+
+            sm.Reset(); sm.Start();
+            sm.TriggerEvent("go");
+            exit_done(true);
+            ctx.Check(sm.IsTransitioning(), "Enter should remain pending");
+            ctx.Check(sm.CancelActiveTransition(), "Enter cancellation should succeed");
+            enter_done(true); enter_done(false); enter_done(true);
+            ctx.Check(sm.GetCurrent() == "A" && settled == 2, "Late enter completions should be inert");
+        });
+
+        add("Successful terminal claim refuses cancellation from success hooks", [](TestContext& ctx) {
+            int refused = 0, settled = 0;
+            StateMachine sm;
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto d) { d(true); }, {}});
+            sm.AddState({"B", [](auto&, auto d) { d(true); }, {}});
+            Transition t{"go", "A", "B", {}, {}, [&](const auto&) {
+                ++refused;
+                ctx.Check(!sm.CancelActiveTransition(), "OnAfter cancellation must be refused after success claim");
+            }};
+            sm.AddTransition(t);
+            sm.WhenTransitionFinished = [&](const auto&) { ctx.Check(!sm.CancelActiveTransition(), "WhenFinished cancellation must be refused after success claim"); };
+            sm.WhenTransitionSettled = [&](const auto& r) { if (r.outcome == TransitionOutcome::Succeeded) ++settled; };
+            sm.Start();
+            settled = 0;
+            sm.TriggerEvent("go");
+            ctx.Check(refused == 1, Format("Both success hooks should not cancel (refused=%d)", refused));
+            ctx.Check(settled == 1, Format("Success should settle once (settled=%d)", settled));
+            ctx.Check(sm.GetCurrent() == "B", "Successful target should remain current");
+            ctx.Check(sm.GetLastTransitionOutcome() == TransitionOutcome::Succeeded, "Successful result must remain authoritative");
+        });
+
+        add("Settlement callback is re-entrant with stable outer result", [](TestContext& ctx) {
+            int callbacks = 0;
+            TransitionResult outer, nested;
+            StateMachine sm;
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto d) { d(true); }, {}});
+            sm.AddState({"B", [](auto&, auto d) { d(true); }, {}});
+            sm.AddState({"C", [](auto&, auto d) { d(true); }, {}});
+            sm.AddTransition({"go", "A", "B"});
+            sm.AddTransition({"next", "B", "C"});
+            sm.WhenTransitionSettled = [&](const auto& r) {
+                ++callbacks;
+                if (r.event == "go") {
+                    outer = r;
+                    ctx.Check(sm.TriggerEvent("next"), "Settlement callback should start nested transition");
+                }
+                else if (r.event == "next")
+                    nested = r;
+                if (r.event == "go")
+                    ctx.Check(r.to == "B" && outer.to == "B", "Outer settlement result must remain stable");
+                if (r.event == "next")
+                    ctx.Check(r.to == "C" && nested.to == "C", "Nested settlement result must remain stable");
+            };
+            sm.Start(); sm.TriggerEvent("go");
+            ctx.Check(callbacks == 3 && outer.to == "B" && nested.to == "C" && sm.GetCurrent() == "C" && sm.GetLastTransitionResult().to == "C", "Nested settlement should leave newest result published");
+        });
+
+        add("Settlement callback may destroy its owner", [](TestContext& ctx) {
+            std::unique_ptr<StateMachine> owner(new StateMachine);
+            StateMachine* raw = owner.get();
+            raw->SetInitial("A");
+            raw->AddState({"A", [](auto&, auto d) { d(true); }, {}});
+            raw->AddState({"B", [](auto&, auto d) { d(true); }, {}});
+            raw->AddTransition({"go", "A", "B"});
+            raw->WhenTransitionSettled = [&](const auto&) { owner.reset(); };
+            raw->Start();
+            raw->TriggerEvent("go");
+            ctx.Check(owner == nullptr, "Settlement destruction should complete without a post-callback access");
+        });
+
+        add("Structured failure and back outcomes carry exact fields", [](TestContext& ctx) {
+            Function<void(bool)> fail_exit, fail_enter, back_exit;
+            Vector<TransitionResult> results;
+            StateMachine sm;
+            sm.SetInitial("A");
+            sm.AddState({"A", [](auto&, auto d) { d(true); }, [&](auto&, auto d) { fail_exit = pick(d); }});
+            sm.AddState({"B", [&](auto&, auto d) { fail_enter = pick(d); }, [&](auto&, auto d) { back_exit = pick(d); }});
+            sm.AddTransition({"go", "A", "B"});
+            sm.WhenTransitionSettled = [&](const auto& r) { results.Add(r); };
+            sm.Start();
+            ctx.Check(results[0].operation == TransitionOperationKind::Start && results[0].outcome == TransitionOutcome::Succeeded && results[0].to == "A" && results[0].event == "__start", "Start result fields should be exact");
+            sm.TriggerEvent("go"); fail_exit(false);
+            ctx.Check(results.Top().outcome == TransitionOutcome::FailedExit && results.Top().from == "A" && results.Top().to == "B" && results.Top().event == "go", "Failed exit fields should be exact");
+            sm.TriggerEvent("go");
+            fail_exit(true);
+            fail_enter(false);
+            ctx.Check(results.Top().outcome == TransitionOutcome::FailedEnter, "Failed enter outcome should be exact");
+            sm.AddState({"C", [](auto&, auto d) { d(true); }, {}});
+            ctx.Check(sm.GetHistoryCount() == 1, "Failed transitions must not commit history");
+        });
+
+    });
+
     RunGroup("SM-002 async lifecycle hardening", passed, failed, [&](auto add) {
         add("No active cancellation is stable", [](TestContext& ctx) {
             StateMachine sm;
@@ -4677,6 +4823,8 @@ CONSOLE_APP_MAIN
             ctx.Check(!sm.IsStarted() && sm.GetCurrent().IsEmpty() && sm.GetHistoryCount() == 0, "Startup cancellation should roll back runtime");
             ctx.Check(settled == 1 && result.sequence == seq && result.operation == TransitionOperationKind::Start && result.outcome == TransitionOutcome::Cancelled, "Startup should settle exactly once as cancelled");
             done(true); done(false);
+            done(false);
+            done(true);
             ctx.Check(settled == 1 && sm.GetHistoryCount() == 0, "Late startup completions should be inert");
         });
 
@@ -4698,6 +4846,32 @@ CONSOLE_APP_MAIN
             ctx.Check(sm.GetCurrent() == "A" && sm.GetHistoryCount() == history && sm.GetQueuedEventCount() == 1, "Exit cancellation should preserve source and queue");
             exit_done(true); exit_done(false);
             ctx.Check(settled == 1 && sm.GetCurrent() == "A" && sm.GetQueuedEventCount() == 1, "Late exit completion should not drain queue");
+        });
+
+        add("Synchronous cancellation stops the active queue drain", [](TestContext& ctx) {
+            Function<void(bool)> exit_done;
+            StateMachine sm;
+            sm.SetInitial("A");
+            sm.SetEventPolicy(EventPolicy::QueueWhileTransitioning);
+            sm.AddState({"A", [](auto&, auto d) { d(true); }, [&](auto&, auto d) { exit_done = pick(d); }});
+            sm.AddState({"B", [](auto&, auto d) { d(true); }, {}});
+            sm.AddState({"C", [](auto&, auto d) { d(true); }, {}});
+            sm.AddState({"D", [](auto&, auto d) { d(true); }, {}});
+            sm.AddTransition({"hold", "A", "B"});
+            Transition first{"first", "B", "C", {}, [&](const auto&) {
+                ctx.Check(sm.CancelActiveTransition(), "Queued transition should cancel synchronously");
+            }, {}};
+            Transition second{"second", "B", "D", {}, {}, {}};
+            sm.AddTransition(first);
+            sm.AddTransition(second);
+            sm.Start();
+            sm.TriggerEvent("hold");
+            sm.TriggerEvent("first");
+            sm.TriggerEvent("second");
+            exit_done(true);
+            ctx.Check(sm.GetCurrent() == "B" && sm.GetQueuedEventCount() == 1, "Cancelled queued transition should preserve remaining queue");
+            ctx.Check(sm.TriggerEvent("second"), "Independent later transition should be accepted");
+            ctx.Check(sm.GetCurrent() == "D" && sm.GetQueuedEventCount() == 0, "Later success should drain retained queue policy");
         });
 
         add("Enter cancellation preserves source and rejects late enter", [](TestContext& ctx) {
@@ -4803,11 +4977,48 @@ CONSOLE_APP_MAIN
             {
                 StateMachine sm;
                 sm.SetInitial("A");
-                sm.AddState({"A", [&](auto&, auto d) { done = pick(d); }, {}});
+                sm.AddState({"A", [&](auto&, auto d) { done = d; }, {}});
                 sm.Start();
             }
-            done(true); done(false);
+            done(true);
             ctx.Check(true, "Completion after destruction returned safely");
+        });
+
+        add("Retained exit, enter, and back callbacks survive destruction", [](TestContext& ctx) {
+            Function<void(bool)> exit_done, enter_done, back_done;
+            {
+                std::unique_ptr<StateMachine> owner(new StateMachine);
+                owner->SetInitial("A");
+                owner->AddState({"A", [](auto&, auto d) { d(true); }, [&](auto&, auto d) { exit_done = pick(d); }});
+                owner->AddState({"B", [&](auto&, auto d) { enter_done = pick(d); }, {}});
+                owner->AddTransition({"go", "A", "B"});
+                owner->Start();
+                owner->TriggerEvent("go");
+                owner.reset();
+            }
+            if (exit_done) { Cout() << "  destroy exit callbacks\n"; Cout().Flush(); exit_done(true); Cout() << "  destroy exit callback complete\n"; Cout().Flush(); exit_done(false); }
+            if (enter_done) { Cout() << "  destroy enter callbacks 1\n"; enter_done(true); enter_done(false); }
+            {
+                std::unique_ptr<StateMachine> owner(new StateMachine);
+                owner->SetInitial("A");
+                owner->AddState({"A", [](auto&, auto d) { d(true); }, {}});
+                owner->AddState({"B", [&](auto&, auto d) { enter_done = pick(d); }, {}});
+                owner->AddTransition({"go", "A", "B"});
+                owner->Start(); owner->TriggerEvent("go");
+                owner.reset();
+            }
+            if (enter_done) { Cout() << "  destroy enter callbacks 2\n"; Cout().Flush(); enter_done(true); Cout() << "  destroy enter callback complete\n"; Cout().Flush(); enter_done(false); }
+            {
+                std::unique_ptr<StateMachine> owner(new StateMachine);
+                owner->SetInitial("A");
+                owner->AddState({"A", [](auto&, auto d) { d(true); }, {}});
+                owner->AddState({"B", [](auto&, auto d) { d(true); }, [&](auto&, auto d) { back_done = pick(d); }});
+                owner->AddTransition({"go", "A", "B"});
+                owner->Start(); owner->TriggerEvent("go"); owner->GoBack();
+                owner.reset();
+            }
+            Cout() << "  destroy back callbacks\n"; Cout().Flush(); if (back_done) { back_done(true); Cout() << "  destroy back callback complete\n"; Cout().Flush(); back_done(false); }
+            ctx.Check(true, "Retained callbacks after destruction returned safely");
         });
 
         add("Cancellation followed by Clear rejects stale completion", [](TestContext& ctx) {

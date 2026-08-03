@@ -35,7 +35,6 @@
 */
 #include "statemachine.h"
 
-#include <memory>
 
 namespace Upp {
 
@@ -74,26 +73,77 @@ String StateMachine::GetLastErrorText() const {
     return GetStateMachineErrorText(last_error);
 }
 
-struct StateMachine::Operation {
-    TransitionResult result;
-    bool settled = false;
-    bool record = true;
+struct StateMachine::Lifetime : Pte<Lifetime> {
+    StateMachine* owner = nullptr;
 };
+
+struct StateMachine::Operation : Pte<Operation> {
+    enum class Phase { Active, Claiming, Settled };
+    TransitionResult result;
+    Phase phase = Phase::Active;
+    bool record = true;
+    CallbackPhase awaiting = CallbackPhase::Start;
+    StateMachine* owner = nullptr;
+    Function<void(const TransitionContext&)> on_after;
+};
+
+struct StateMachine::Completion {
+    Ptr<Operation> operation;
+    CallbackPhase phase;
+
+    Completion(Operation* operation, CallbackPhase phase)
+        : operation(operation), phase(phase) {}
+
+    void operator()(bool success) const {
+        if (operation && operation->owner)
+            operation->owner->CompleteOperation(operation, phase, success);
+    }
+};
+
+StateMachine::StateMachine() : lifetime(MakeOne<Lifetime>()) {
+    lifetime->owner = this;
+}
+
+StateMachine::~StateMachine() {
+    active_operation.Clear();
+    lifetime.Clear();
+}
 
 uint64 StateMachine::GetActiveTransitionSequence() const {
     return active_operation ? active_operation->result.sequence : 0;
 }
 
-void StateMachine::Settle(const std::shared_ptr<Operation>& op, TransitionOutcome outcome, bool success) {
-    if (!op || op->settled || active_operation != op)
-        return;
-    op->settled = true;
+bool StateMachine::IsCurrent(const Operation* op) const {
+    return op && active_operation.Get() == op && op->phase == Operation::Phase::Active;
+}
+
+bool StateMachine::IsClaimed(const Operation* op) const {
+    return op && active_operation.Get() == op && op->phase == Operation::Phase::Claiming;
+}
+
+bool StateMachine::Claim(Operation* op, TransitionOutcome outcome) {
+    if (!IsCurrent(op))
+        return false;
+    op->phase = Operation::Phase::Claiming;
     op->result.outcome = outcome;
-    active_operation.reset();
+    return true;
+}
+
+void StateMachine::SettleClaimed(Operation* op, bool drain_queue) {
+    if (!op || op->phase != Operation::Phase::Claiming || active_operation.Get() != op)
+        return;
+    op->phase = Operation::Phase::Settled;
     last_result = op->result;
     transitioning = false;
-    if (WhenTransitionSettled)
-        WhenTransitionSettled(last_result);
+    const TransitionResult stable_result = op->result;
+    Ptr<Lifetime> self(lifetime.Get());
+    active_operation.Clear();
+    auto settled_callback = WhenTransitionSettled;
+    if (settled_callback)
+        settled_callback(stable_result);
+    StateMachine* owner = self ? self->owner : nullptr;
+    if (owner && drain_queue)
+        owner->DrainQueuedEvents();
 }
 
 bool StateMachine::CancelActiveTransition() {
@@ -101,22 +151,105 @@ bool StateMachine::CancelActiveTransition() {
         last_error = StateMachineError::NoActiveTransition;
         return false;
     }
-    auto op = active_operation;
-    op->settled = true;
-    op->result.outcome = TransitionOutcome::Cancelled;
-    last_result = op->result;
-    active_operation.reset();
-    transitioning = false;
+    Operation* op = active_operation.Get();
+    if (!Claim(op, TransitionOutcome::Cancelled)) {
+        return false;
+    }
     if (op->result.operation == TransitionOperationKind::Start) {
         started = false;
         current.Clear();
         transitionHistory.Clear();
         queued_events.Clear();
     }
-    if (WhenTransitionSettled)
-        WhenTransitionSettled(last_result);
     ClearError();
+    SettleClaimed(op, false);
     return true;
+}
+
+void StateMachine::CompleteOperation(Operation* op, CallbackPhase phase, bool success) {
+    if (!IsCurrent(op) || op->awaiting != phase)
+        return;
+
+    if (phase == CallbackPhase::Start) {
+        if (success) {
+            if (!Claim(op, TransitionOutcome::Succeeded))
+                return;
+            transitionHistory.Add(MakeOne<TransitionRecord>("", op->result.to, "__start"));
+            ClearError();
+            SettleClaimed(op, true);
+        }
+        else {
+            if (!Claim(op, TransitionOutcome::FailedStart))
+                return;
+            started = false;
+            current.Clear();
+            transitionHistory.Clear();
+            queued_events.Clear();
+            last_error = StateMachineError::StartEnterFailed;
+            SettleClaimed(op, false);
+        }
+        return;
+    }
+
+    if (phase == CallbackPhase::Exit) {
+        if (!success) {
+            if (!Claim(op, op->result.operation == TransitionOperationKind::Back ? TransitionOutcome::FailedBack : TransitionOutcome::FailedExit))
+                return;
+            last_error = op->result.operation == TransitionOperationKind::Back ? StateMachineError::BackTransitionFailed : StateMachineError::ExitFailed;
+            SettleClaimed(op, false);
+            return;
+        }
+
+        const State* target = FindState(op->result.to);
+        if (!target) {
+            if (Claim(op, op->result.operation == TransitionOperationKind::Back ? TransitionOutcome::FailedBack : TransitionOutcome::FailedEnter)) {
+                last_error = StateMachineError::MissingToState;
+                SettleClaimed(op, false);
+            }
+            return;
+        }
+        op->awaiting = CallbackPhase::Enter;
+        auto enter_callback = target->OnEnter;
+        if (enter_callback)
+            enter_callback(*this, Function<void(bool)>(Completion(op, CallbackPhase::Enter)));
+        else
+            CompleteOperation(op, CallbackPhase::Enter, true);
+        return;
+    }
+
+    if (!success) {
+        if (!Claim(op, op->result.operation == TransitionOperationKind::Back ? TransitionOutcome::FailedBack : TransitionOutcome::FailedEnter))
+            return;
+        last_error = op->result.operation == TransitionOperationKind::Back ? StateMachineError::BackTransitionFailed : StateMachineError::EnterFailed;
+        SettleClaimed(op, false);
+        return;
+    }
+
+    if (!Claim(op, TransitionOutcome::Succeeded))
+        return;
+    TransitionContext ctx(*this, op->result.from, op->result.to, op->result.event);
+    current = ctx.toState;
+    Finalize(ctx, op->record);
+    if (op->result.operation == TransitionOperationKind::Back && !transitionHistory.IsEmpty())
+        transitionHistory.Pop();
+    ClearError();
+
+    auto finished_callback = WhenTransitionFinished;
+    if (finished_callback)
+        finished_callback(ctx);
+    Ptr<Lifetime> life(lifetime.Get());
+    StateMachine* owner = life ? life->owner : nullptr;
+    if (!owner || !owner->IsClaimed(op))
+        return;
+    auto after_callback = op->on_after;
+    if (after_callback)
+        after_callback(ctx);
+    life = Ptr<Lifetime>(owner->lifetime.Get());
+    owner = life ? life->owner : nullptr;
+    if (!owner || !owner->IsClaimed(op))
+        return;
+    owner->ClearError();
+    owner->SettleClaimed(op, true);
 }
 
 //------------------------------------------------------------------------------
@@ -235,50 +368,28 @@ bool StateMachine::Start() {
     }
 
     const String start_initial = initial;
-    auto op = std::make_shared<Operation>();
+    auto op = MakeOne<Operation>();
     op->result.sequence = ++next_sequence;
     op->result.operation = TransitionOperationKind::Start;
     op->result.to = start_initial;
     op->result.event = "__start";
-    active_operation = op;
-    std::weak_ptr<void> weak_lifetime = lifetime;
-    auto start_finished = std::make_shared<bool>(false);
+    op->owner = this;
+    active_operation = pick(op);
+    Operation* active = active_operation.Get();
     started = true;
     transitioning = true;
     current = start_initial;
     ClearError();
 
-    auto finish_start = [this, weak_lifetime, op, start_initial, start_finished](bool success) {
-        if (weak_lifetime.expired() || active_operation != op || op->settled)
-            return;
-        if (*start_finished)
-            return;
-        *start_finished = true;
-
-        if (success) {
-            transitionHistory.Add(MakeOne<TransitionRecord>("", start_initial, "__start"));
-            Settle(op, TransitionOutcome::Succeeded, true);
-            ClearError();
-            DrainQueuedEvents();
-            return;
-        }
-
-        started = false;
-        current.Clear();
-        transitionHistory.Clear();
-        queued_events.Clear();
-        last_error = StateMachineError::StartEnterFailed;
-        Settle(op, TransitionOutcome::FailedStart, false);
-    };
-
-    if (init->OnEnter)
-        init->OnEnter(*this, [weak_lifetime, finish_start](bool success) {
-            finish_start(success);
-        });
+    auto initial_enter = init->OnEnter;
+    Function<void(bool)> completion(Completion(active, CallbackPhase::Start));
+    if (initial_enter)
+        initial_enter(*this, completion);
     else
-        finish_start(true);
+        CompleteOperation(active, CallbackPhase::Start, true);
     return true;
 }
+
 
 //------------------------------------------------------------------------------
 // Trigger an event by name
@@ -496,8 +607,9 @@ bool StateMachine::DoTransition(const Transition& t, bool record, TransitionOper
     if (logging)
         LOG(Format("DoTransition: %s -> %s, record=%d", t.from, t.to, int(record)));
 
-    const State* fromState = FindState(t.from);
-    const State* toState   = FindState(t.to);
+    const Transition transition = t;
+    const State* fromState = FindState(transition.from);
+    const State* toState   = FindState(transition.to);
     if (!fromState) {
         last_error = StateMachineError::MissingFromState;
         if (logging)
@@ -511,108 +623,40 @@ bool StateMachine::DoTransition(const Transition& t, bool record, TransitionOper
         return false;
     }
 
-    auto op = std::make_shared<Operation>();
+    auto op = MakeOne<Operation>();
     op->result.sequence = ++next_sequence;
     op->result.operation = kind;
-    op->result.from = t.from;
-    op->result.to = t.to;
-    op->result.event = t.event;
+    op->result.from = transition.from;
+    op->result.to = transition.to;
+    op->result.event = transition.event;
     op->record = record;
-    active_operation = op;
-    std::weak_ptr<void> weak_lifetime = lifetime;
-    auto enter_finished = std::make_shared<bool>(false);
-    auto exit_finished  = std::make_shared<bool>(false);
-    auto enter_started  = std::make_shared<bool>(false);
+    op->awaiting = CallbackPhase::Exit;
+    op->owner = this;
+    op->on_after = transition.OnAfter;
+    active_operation = pick(op);
+    Operation* active = active_operation.Get();
     ClearError();
     transitioning = true;
-    TransitionContext ctx(*this, t.from, t.to, t.event);
+    TransitionContext ctx(*this, transition.from, transition.to, transition.event);
 
-    // OnBefore callback
-    if (WhenTransitionStarted)
-        WhenTransitionStarted(ctx);
-    if (t.OnBefore)
-        t.OnBefore(ctx);
+    Ptr<Lifetime> callback_lifetime(lifetime.Get());
+    auto started_callback = WhenTransitionStarted;
+    if (started_callback)
+        started_callback(ctx);
+    if (!callback_lifetime || callback_lifetime->owner != this || !IsCurrent(active))
+        return true;
+    auto before_callback = transition.OnBefore;
+    if (before_callback)
+        before_callback(ctx);
+    if (!callback_lifetime || callback_lifetime->owner != this || !IsCurrent(active))
+        return true;
 
     // Chain exit → enter → finalize → after
-    auto on_enter_done = [this, weak_lifetime, op, ctx, record, t, enter_finished, enter_started](bool success) {
-        if (weak_lifetime.expired() || active_operation != op || op->settled)
-            return;
-        if (*enter_finished)
-            return;
-        *enter_finished = true;
-
-        if (success) {
-            Finalize(ctx, record);
-            if (op->result.operation == TransitionOperationKind::Back && !transitionHistory.IsEmpty())
-                transitionHistory.Pop();
-            if (WhenTransitionFinished)
-                WhenTransitionFinished(ctx);
-
-            if (t.OnAfter)
-                t.OnAfter(ctx);
-
-            ClearError();
-        }
-        else {
-            if (!record)
-                last_error = StateMachineError::BackTransitionFailed;
-            else if (*enter_started)
-                last_error = StateMachineError::EnterFailed;
-            else
-                last_error = StateMachineError::ExitFailed;
-        }
-        Settle(op, success ? TransitionOutcome::Succeeded :
-               (!record ? TransitionOutcome::FailedBack : (*enter_started ? TransitionOutcome::FailedEnter : TransitionOutcome::FailedExit)), success);
-        if (success)
-            DrainQueuedEvents();
-    };
-
-    auto on_exit_done = [this, weak_lifetime, op, toState, ctx, on_enter_done, exit_finished, enter_started, enter_finished, record](bool success) {
-        if (weak_lifetime.expired() || active_operation != op || op->settled)
-            return;
-        if (*exit_finished)
-            return;
-        *exit_finished = true;
-
-        if (success) {
-            if (toState && toState->OnEnter) {
-                *enter_started = true;
-                toState->OnEnter(*this, [this, weak_lifetime, op, ctx, on_enter_done, enter_finished](bool enter_success) {
-                    if (*enter_finished)
-                        return;
-                    if (weak_lifetime.expired() || active_operation != op || op->settled)
-                        return;
-                    if (enter_success)
-                        current = ctx.toState;
-                    if (logging) {
-                        LOG("Transition " + String(enter_success ? "succeeded" : "failed") +
-                            ": now in state " + current);
-                    }
-                    on_enter_done(enter_success);
-                });
-            }
-            else {
-                *enter_started = true;
-                current = ctx.toState;
-                if (logging)
-                    LOG("Transition succeeded: now in state " + current);
-                on_enter_done(true);
-            }
-        }
-        else {
-            if (logging)
-                LOG("Error: OnExit failed, transition aborted.");
-            transitioning = false;
-            last_error = record ? StateMachineError::ExitFailed : StateMachineError::BackTransitionFailed;
-            on_enter_done(false);
-        }
-    };
-
-    // Start exit phase
-    if (fromState->OnExit)
-        fromState->OnExit(*this, on_exit_done);
+    auto exit_callback = fromState->OnExit;
+    if (exit_callback)
+        exit_callback(*this, Function<void(bool)>(Completion(active, CallbackPhase::Exit)));
     else
-        on_exit_done(true);
+        CompleteOperation(active, CallbackPhase::Exit, true);
 
     return true;
 }
@@ -646,9 +690,12 @@ void StateMachine::DrainQueuedEvents() {
         String event = queued_events[0];
         queued_events.Remove(0);
         ++drain_steps;
+        const uint64 sequence_before = next_sequence;
         if (!TriggerEvent(event))
             break;
         if (transitioning)
+            break;
+        if (last_result.sequence > sequence_before && last_result.outcome == TransitionOutcome::Cancelled)
             break;
         if (last_error != StateMachineError::None)
             break;

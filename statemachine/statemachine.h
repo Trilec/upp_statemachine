@@ -19,13 +19,14 @@
     - Support flat state graphs with explicit event transitions.
     - Keep queueing strict: TriggerEvent() names only, bounded FIFO, no payloads,
       no queued TryTransition(), and no queued GoBack().
-    - Avoid framework expansion: no hierarchy, cancellation, background worker,
+    - Avoid framework expansion: no hierarchy, background worker,
       thread locking, or GUI dependency in the core package.
 
     Thread context
     - Same-thread / same-callback-chain use.
     - The class does not provide internal locking.
-    - The StateMachine object must outlive pending async completion callbacks.
+    - StateMachine-supplied completion callbacks are safe after cancellation or
+      destruction; arbitrary caller-owned captures remain caller-owned.
 
     Usage
     - Add states with AddState(...), configure SetInitial(...), add transitions
@@ -44,7 +45,6 @@
 #pragma once
 
 #include <Core/Core.h>
-#include <memory>
 
 namespace Upp {
 
@@ -78,7 +78,7 @@ namespace Upp {
 
 	enum class TransitionOutcome { None, Succeeded, FailedExit, FailedEnter, FailedStart, FailedBack, Cancelled };
 	enum class TransitionOperationKind { None, Start, Transition, Back };
-	struct TransitionResult {
+	struct TransitionResult : Moveable<TransitionResult> {
 		uint64 sequence = 0;
 		TransitionOperationKind operation = TransitionOperationKind::None;
 		TransitionOutcome outcome = TransitionOutcome::None;
@@ -135,6 +135,12 @@ namespace Upp {
 	/// The main FSM class
 	class StateMachine {
 	public:
+    StateMachine();
+	    ~StateMachine();
+	    StateMachine(const StateMachine&) = delete;
+	    StateMachine& operator=(const StateMachine&) = delete;
+	    StateMachine(StateMachine&&) = delete;
+	    StateMachine& operator=(StateMachine&&) = delete;
 	    /// Set the initial state by its ID
 	    bool SetInitial(const String& id) {
 	        if (id.IsEmpty()) {
@@ -213,7 +219,7 @@ namespace Upp {
 	    /// True if an async transition is in progress
 	    bool IsTransitioning() const             { return transitioning; }
 	    bool CancelActiveTransition();
-	    bool HasActiveTransition() const { return active_operation != nullptr; }
+	    bool HasActiveTransition() const { return bool(active_operation); }
     uint64 GetActiveTransitionSequence() const;
     uint64 GetLastSettledTransitionSequence() const { return last_result.sequence; }
     TransitionOutcome GetLastTransitionOutcome() const { return last_result.outcome; }
@@ -267,8 +273,15 @@ namespace Upp {
 	    const Transition*  FindTransition(const String& from, const String& ev) const;
 	
 	    struct Operation;
+	    struct Lifetime;
+	    struct Completion;
+	    enum class CallbackPhase { Start, Exit, Enter };
 	    bool DoTransition(const Transition& t, bool record = true, TransitionOperationKind kind = TransitionOperationKind::Transition);
-	    void Settle(const std::shared_ptr<Operation>& op, TransitionOutcome outcome, bool success);
+	    bool Claim(Operation* op, TransitionOutcome outcome);
+	    bool IsCurrent(const Operation* op) const;
+	    bool IsClaimed(const Operation* op) const;
+	    void SettleClaimed(Operation* op, bool drain_queue);
+	    void CompleteOperation(Operation* op, CallbackPhase phase, bool success);
 	    bool QueueEvent(const String& e);
 	    void DrainQueuedEvents();
 	
@@ -288,10 +301,10 @@ namespace Upp {
 	    Vector<String> queued_events;
 	    int max_queued_events = 64;
 	    StateMachineError last_error = StateMachineError::None;
-	    std::shared_ptr<Operation> active_operation;
+	    One<Operation> active_operation;
 	    TransitionResult last_result;
 	    uint64 next_sequence = 0;
-	    std::shared_ptr<void> lifetime = std::make_shared<int>(0);
+	    One<Lifetime> lifetime;
 	};
 
 } // namespace Upp

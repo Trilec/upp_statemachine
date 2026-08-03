@@ -8,7 +8,7 @@
 - **Published HEAD verified on 2026-08-02:** `93e20f109181e16667176214484cb4f585a3d2b8`.
 - **Reported local path:** `E:\apps\github\upp_statemachine`.
 - **Purpose:** provide a deterministic, reusable, GUI-independent lifecycle engine with asynchronous enter/exit operations.
-- **Current phase:** v1.0.1 is published; bounded async lifecycle hardening is specified but not implemented.
+- **Current phase:** SM-002 is implemented locally; SM-002-R1 closes re-entrant settlement and lifetime gaps pending supervisor review.
 - **Boundary:** this remains a one-current-state Core-only FSM. It does not become a graph scheduler, agent runtime, GUI system, tool broker, conversation layer, or MCP component.
 
 ## 2. Roles, Workflow, and Task Standards
@@ -121,7 +121,7 @@ Strict prohibitions:
 
 - **Turn the FSM into the AgentFlow scheduler: rejected.** Graph scheduling belongs in `AgentFlowRuntime`.
 - **Add internal timers/threads for timeout handling: rejected.** Timeout policy remains caller-owned.
-- **Require the machine to outlive unsafe callbacks forever: superseded target.** Lifetime-safe late completion handling is now required.
+- **Require the machine to outlive unsafe callbacks forever: superseded.** StateMachine-supplied callbacks use a lifetime token; arbitrary caller captures remain caller-owned.
 - **Use cancellation as rollback of user side effects: rejected.** Cancellation settles ownership only.
 - **Add MCP or GUI hooks to core: rejected.** Those belong above the package.
 
@@ -133,8 +133,8 @@ Strict prohibitions:
 | `StateMachineCoreTest` | Authoritative regression suite | Published 190/190 | Needs async cancellation/lifetime matrix |
 | `StateMachineGuiTest` | GUI build/manual check | Published | Not behavioural authority for core |
 | `StateMachineVisualizer` | Visual/manual harness | Published | Reference only; must not drive core design |
-| Structured settlement | Terminal async outcome | Not implemented | Next task |
-| Cancellation | Active transition cancellation | Not implemented | Next task |
+| Structured settlement | Terminal async outcome | Implemented; R1 validation pending | Supervisor review |
+| Cancellation | Active transition cancellation | Implemented; R1 validation pending | Supervisor review |
 
 ## 6. Current Verified State and Active Milestone
 
@@ -143,7 +143,7 @@ Strict prohibitions:
 - `main` HEAD is `93e20f109181e16667176214484cb4f585a3d2b8`.
 - README declares v1.0.1 and the 190/190 Core baseline.
 - `statemachine` depends only on `Core`.
-- Current README explicitly states cancellation is not implemented and the machine must outlive pending async callbacks.
+- Current API documents structured cancellation and lifetime-safe StateMachine-supplied callbacks.
 
 ### Locally reported
 
@@ -177,7 +177,7 @@ Estimated completion:
 
 - **Published v1.0.1 baseline: 100%.**
 - **SM-002 specification: approximately 95%.**
-- **SM-002 implementation: approximately 0%.**
+- **SM-002 implementation: implemented locally.**
 
 Continue from: verify branch/HEAD/worktree; run 190/190 Core and GUI/example baseline; inspect all async paths; execute the exact task below.
 
@@ -210,9 +210,9 @@ AgentFlowCore and runtime may begin
 
 Authoritative task source: `Trilec/upp_agentflow/docs/AgentFlow_StateMachine_Adjustments.md`.
 
-### Exact next task
+### Corrective task
 
-**Task ID:** `SM-002`  
+**Task ID:** `SM-002-R1`  
 **Title:** Harden asynchronous lifecycle cancellation and settlement
 
 **Current context:** asynchronous completion currently requires owner lifetime and has no cancellation.
